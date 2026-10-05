@@ -1,11 +1,8 @@
 @echo off
 setlocal
-cd /d "%~dp0"
-if not exist ".venv\Scripts\python.exe" (
-  echo Run Setup.cmd first.
-  pause
-  exit /b 1
-)
-set PYTHONDONTWRITEBYTECODE=1
-".venv\Scripts\python.exe" -m unittest discover -s tests -v
+set "CDD_BOOTSTRAP=%~dp0WorkflowBootstrap.ps1"
+set "CDD_BOOTSTRAP_ACTION=Test"
+powershell.exe -NoProfile -File "%CDD_BOOTSTRAP%" -Action "%CDD_BOOTSTRAP_ACTION%"
+set "TEST_EXIT=%ERRORLEVEL%"
 pause
+exit /b %TEST_EXIT%
