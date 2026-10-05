@@ -50,6 +50,7 @@ class GuidedInterfaceTests(unittest.TestCase):
         self.root = Path(self.directory.name)
         try:
             self.app = App(self.root / "settings.json")
+            self.app.animations_enabled = False
         except tk.TclError as exc:
             self.directory.cleanup()
             self.skipTest(f"A desktop display is required: {exc}")
@@ -74,15 +75,20 @@ class GuidedInterfaceTests(unittest.TestCase):
     def test_values_persist_when_moving_back_and_forward(self):
         original = self.app.vars["working_csv"].get()
         self.app._continue()
-        self.assertEqual(self.app.step, 1)
-        self.app._navigate(0)
+        self.assertEqual((self.app.step, self.app.part), (0, 1))
+        self.app._back()
         self.assertEqual(self.app.vars["working_csv"].get(), original)
         self.assertTrue((self.root / "settings.json").is_file())
+        for _ in range(len(self.app.step_parts[0])):
+            self.app._continue()
+        self.assertEqual(self.app.step, 1)
 
     def test_missing_required_input_blocks_continue_and_direct_navigation(self):
         self.app.vars["working_csv"].set("")
+        self.app._show_step(0, 2)
         self.app._continue()
         self.assertEqual(self.app.step, 0)
+        self.assertEqual(self.app.part, 2)
         self.app._navigate(4)
         self.assertEqual(self.app.step, 0)
         self.assertIn("Working case list", self.app.feedback_var.get())
@@ -141,8 +147,18 @@ class GuidedInterfaceTests(unittest.TestCase):
         self.app.events.put(("stage", "copilot"))
         self.app._drain_events()
         self.assertEqual(self.app.status_var.get(), "Reviewing in Copilot")
-        from workflow.design import COLORS
-        self.assertEqual(str(self.app.stage_labels["copilot"]["foreground"]), COLORS["blue"])
+        self.assertIn("Reviewing in Copilot", self.app.activity_lines)
+
+    def test_successful_master_does_not_report_failure_without_browser_readiness(self):
+        from types import SimpleNamespace
+        self.app.ready_config = None
+        self.app.running = True
+        self.app.worker = SimpleNamespace(is_alive=lambda: False)
+        self.app.orchestrator = SimpleNamespace(state=SimpleNamespace(status="complete"))
+        self.app.events.put(("complete", "Master stage finished."))
+        self.app._drain_events()
+        self.assertIn("Finished", self.app.feedback_var.get())
+        self.assertFalse(self.app.running)
 
     def test_master_stage_remains_accessible_without_browser_readiness(self):
         self.app.vars["source_data_root"].set("")
@@ -151,14 +167,82 @@ class GuidedInterfaceTests(unittest.TestCase):
         self.assertEqual(str(self.app.master_button["state"]), "normal")
         self.assertEqual(str(self.app.start_button["state"]), "disabled")
 
-    def test_keyboard_focus_reveals_fields_below_the_visible_area(self):
-        self.app.geometry("980x700")
-        self.app._show_step(1)
+    def test_only_one_field_page_is_visible_at_a_time(self):
+        self.app.geometry("900x700")
+        self.app._show_step(1, 4)
         self.app.update()
-        form, canvas = self.app.forms[1]
-        last_field = form.winfo_children()[-1]
-        self.app._reveal_field(canvas, last_field)
-        self.assertGreater(canvas.yview()[0], 0)
+        visible = [key for key, frame in self.app.parts.items() if frame.winfo_ismapped()]
+        self.assertEqual(visible, ["diagnostics_dir"])
+        self.app._back()
+        self.assertEqual(self.app.part, 3)
+
+    def test_brand_user_font_and_top_progress(self):
+        self.assertEqual(self.app.brand_label["text"], "CDD Audit Remediation")
+        self.assertTrue(self.app.user_name)
+        self.assertTrue(self.app.ui_font)
+        self.assertLessEqual(self.app.top_progress.winfo_height(), 6)
+
+    def test_detected_user_fallback_uses_current_session(self):
+        from workflow.design import detected_user
+        with patch("workflow.design.os.name", "posix"), patch("workflow.design.getpass.getuser", return_value="current-analyst"):
+            self.assertEqual(detected_user(), "current-analyst")
+
+    def test_cleanup_dialog_requires_exact_confirmation(self):
+        from tkinter import ttk
+        from workflow.design import compact_confirm
+        observed = []
+        def answer():
+            dialog = next(window for window in self.app.winfo_children()
+                          if isinstance(window, tk.Toplevel) and window.title() == "Confirm cleanup")
+            controls = []
+            def visit(widget):
+                controls.append(widget)
+                for child in widget.winfo_children():
+                    visit(child)
+            visit(dialog)
+            primary = next(widget for widget in controls if isinstance(widget, ttk.Button) and widget["text"] == "Allow cleanup")
+            entry = next(widget for widget in controls if isinstance(widget, ttk.Entry))
+            details = next(widget for widget in controls if isinstance(widget, ttk.Button) and widget["text"] == "View files")
+            details.invoke()
+            dialog.update_idletasks()
+            self.assertLessEqual(primary.winfo_rooty() + primary.winfo_height(), dialog.winfo_rooty() + dialog.winfo_height())
+            observed.append(str(primary["state"]))
+            entry.insert(0, "delete")
+            observed.append(str(primary["state"]))
+            entry.delete(0, "end")
+            entry.insert(0, "DELETE")
+            observed.append(str(primary["state"]))
+            primary.invoke()
+        self.app.after(100, answer)
+        self.assertTrue(compact_confirm(self.app, "Confirm cleanup", "One temporary item.", action="Allow cleanup", details="Fictional temporary case folder", required_text="DELETE"))
+        self.assertEqual(observed, ["disabled", "disabled", "normal"])
+
+    def test_page_fades_finish_and_preserve_input_values(self):
+        import time
+        self.app.animations_enabled = True
+        original = self.app.vars["working_csv"].get()
+        self.app._show_step(0, 1, animate=True)
+        self.assertTrue(self.app.transitioning)
+        self.app._continue()
+        deadline = time.monotonic() + 2
+        while self.app.transitioning and time.monotonic() < deadline:
+            self.app.update()
+            time.sleep(0.01)
+        self.assertFalse(self.app.transitioning)
+        self.assertEqual((self.app.step, self.app.part), (0, 1))
+        self.assertEqual(self.app.vars["working_csv"].get(), original)
+        self.assertEqual(self.app.title_label["style"], "Title.TLabel")
+        from workflow.design import COLORS
+        self.assertEqual(self.app.hero_icon.itemcget(self.app.hero_symbol, "fill"), COLORS["blue"])
+
+    def test_stepper_supports_keyboard_navigation(self):
+        self.app.stepper.move(1)
+        self.app.stepper.activate()
+        self.assertEqual(self.app.step, 1)
+        self.app.stepper.enabled = False
+        self.app.stepper.move(1)
+        self.app.stepper.activate()
+        self.assertEqual(self.app.step, 1)
 
     def test_corrupt_saved_configuration_loads_with_clear_feedback(self):
         self.app.destroy()
@@ -168,17 +252,25 @@ class GuidedInterfaceTests(unittest.TestCase):
         self.assertIn("could not be read", self.app.feedback_var.get())
 
     def test_controls_remain_inside_the_workspace_at_common_sizes(self):
-        for width, height in ((1180, 820), (1024, 768), (980, 700)):
+        for width, height in ((1080, 820), (1024, 768), (900, 700)):
             self.app.geometry(f"{width}x{height}")
             for index in range(6):
-                self.app._show_step(index)
-                self.app.update()
-                for widget in (self.app.next_button, self.app.title_label,
-                               self.app.pages[index], self.app.save_button):
-                    self.assertLessEqual(widget.winfo_rootx() + widget.winfo_width(),
-                                         self.app.winfo_rootx() + self.app.winfo_width())
-                    self.assertLessEqual(widget.winfo_rooty() + widget.winfo_height(),
-                                         self.app.winfo_rooty() + self.app.winfo_height())
+                for part in range(len(self.app.step_parts[index])):
+                    self.app._show_step(index, part)
+                    self.app.update()
+                    for widget in (self.app.next_button, self.app.title_label,
+                                   self.app._visible_part(), self.app.save_button):
+                        self.assertLessEqual(widget.winfo_rootx() + widget.winfo_width(),
+                                             self.app.winfo_rootx() + self.app.winfo_width())
+                        self.assertLessEqual(widget.winfo_rooty() + widget.winfo_height(),
+                                             self.app.winfo_rooty() + self.app.winfo_height())
+                    content = self.app._visible_part()
+                    self.assertGreaterEqual(content.winfo_rooty(),
+                                            self.app.hero.winfo_rooty() + self.app.hero.winfo_height(),
+                                            (width, height, index, part, content.winfo_height()))
+                    self.assertLessEqual(content.winfo_rooty() + content.winfo_height(),
+                                         self.app.feedback_label.winfo_rooty(),
+                                         (width, height, index, part, content.winfo_height()))
 
 
 if __name__ == "__main__":
