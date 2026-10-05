@@ -5,6 +5,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+from .files import replace_with_retry
 
 
 def now() -> str:
@@ -32,7 +33,7 @@ class RunState:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
-        os.replace(temporary, path)
+        replace_with_retry(temporary, path)
 
     def stage_started(self, stage: str, path: Path) -> None:
         self.status = "running"

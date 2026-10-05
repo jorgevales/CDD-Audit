@@ -35,12 +35,13 @@ PATH_FIELDS = [
 
 
 class App(tk.Tk):
-    def __init__(self) -> None:
+    def __init__(self, config_path: Path = CONFIG_PATH) -> None:
         super().__init__()
         self.title(f"CDD Document Review Workflow {__version__}")
         self.geometry("1120x780")
         self.minsize(900, 650)
-        self.config_data = WorkflowConfig.load()
+        self.config_path = config_path
+        self.config_data = WorkflowConfig.load(config_path)
         self.vars: dict[str, tk.Variable] = {}
         self.events: queue.Queue[tuple[str, str]] = queue.Queue()
         self.orchestrator: WorkflowOrchestrator | None = None
@@ -150,7 +151,7 @@ class App(tk.Tk):
             self.vars[key].set(selected)
 
     def _collect(self) -> WorkflowConfig:
-        data = WorkflowConfig.load().__dict__
+        data = WorkflowConfig.load(self.config_path).__dict__
         for field in fields(WorkflowConfig):
             if field.name in self.vars:
                 data[field.name] = self.vars[field.name].get()
@@ -162,9 +163,9 @@ class App(tk.Tk):
     def _save(self) -> bool:
         try:
             config = self._collect()
-            config.save()
+            config.save(self.config_path)
             self.config_data = config
-            self.status_var.set(f"Setup saved to {CONFIG_PATH}")
+            self.status_var.set(f"Setup saved to {self.config_path}")
             return True
         except (ValueError, OSError) as exc:
             messagebox.showerror("Setup could not be saved", str(exc), parent=self)
@@ -260,7 +261,8 @@ class App(tk.Tk):
         if self.worker and self.worker.is_alive():
             return
         self.orchestrator = WorkflowOrchestrator(self.config_data, self._emit)
-        target = (lambda: self.orchestrator.run_primary(self.cleanup_var.get())) if mode == "primary" else self.orchestrator.run_master
+        cleanup = self.cleanup_var.get()
+        target = (lambda: self.orchestrator.run_primary(cleanup)) if mode == "primary" else self.orchestrator.run_master
         self.worker = threading.Thread(target=target, daemon=True)
         self.worker.start()
         self.start_button.configure(state="disabled")
@@ -301,5 +303,5 @@ class App(tk.Tk):
             messagebox.showerror("Could not open folder", str(exc), parent=self)
 
 
-def run_app() -> None:
-    App().mainloop()
+def run_app(config_path: Path = CONFIG_PATH) -> None:
+    App(config_path).mainloop()

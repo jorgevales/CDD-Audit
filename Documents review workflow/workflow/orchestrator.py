@@ -18,6 +18,7 @@ from .state import RunState
 
 
 REFS = APP_DIR / "Initial sanitized reference files"
+PYTHON = str(Path(sys.executable).with_name("python.exe")) if Path(sys.executable).name.lower() == "pythonw.exe" else sys.executable
 WAKE_DETAIL = re.compile(r"WAKE CYCLE|VISIBLY VISITED|NEXT WAKE|wake (?:round|cycle)", re.I)
 PROGRESS_SIGNAL = re.compile(r"Remaining|queued|completed|successful|failed|active tabs", re.I)
 
@@ -82,7 +83,7 @@ class WorkflowOrchestrator:
 
     def run_primary(self, cleanup: bool) -> None:
         try:
-            prepare = [sys.executable, "-m", "workflow.engine_runner", "prepare",
+            prepare = [PYTHON, "-u", "-m", "workflow.engine_runner", "prepare",
                        "--config", str(self.config_path)]
             if cleanup:
                 prepare.append("--cleanup")
@@ -98,7 +99,7 @@ class WorkflowOrchestrator:
                 "CDD_MASTER_FOLDER": str(self.config.path("temporary_batch_dir")),
                 "CDD_MERGED_PDF_FOLDER": str(self.config.path("merged_pdf_dir")),
             }
-            self._run("merge", [sys.executable, str(merge_script), "--from-id", str(start),
+            self._run("merge", [PYTHON, "-u", str(merge_script), "--from-id", str(start),
                                 "--to-id", str(end), "--yes"], env=merge_env)
             status_file = self.config.path("merged_pdf_dir") / f"merge_status_{start}_{end}.json"
             if not status_file.is_file():
@@ -114,7 +115,7 @@ class WorkflowOrchestrator:
                 "PYTHONPATH": str(REFS) + os.pathsep + os.environ.get("PYTHONPATH", ""),
             }
             browser = [
-                sys.executable, str(REFS / "08_open_copilot_dynamic_case_size_batches_v25_useful_upto_V12_sanitized.py"),
+                PYTHON, str(REFS / "08_open_copilot_dynamic_case_size_batches_v25_useful_upto_V12_sanitized.py"),
                 "--csv-path", str(self.config.path("working_csv")),
                 "--completed-path", str(self.config.path("completed_csv")),
                 "--log-path", str(self.config.path("sent_log_csv")),
@@ -144,7 +145,7 @@ class WorkflowOrchestrator:
 
     def run_master(self) -> None:
         try:
-            command = [sys.executable, "-m", "workflow.engine_runner", "master",
+            command = [PYTHON, "-u", "-m", "workflow.engine_runner", "master",
                        "--config", str(self.config_path)]
             self._run("master", command)
             self.state.complete(self.state_path)

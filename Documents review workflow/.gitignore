@@ -2,5 +2,11 @@
 __pycache__/
 *.py[cod]
 diagnostics/
+demo/
+Start Demo.cmd
+workflow/demo.py
+workflow/live_check.py
+tests/test_demo.py
+Initial sanitized reference files/resources/Copilot_Automation_Diagnostics/
 build/
 dist/

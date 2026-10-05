@@ -5,6 +5,7 @@ import os
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
+from .files import replace_with_retry
 
 
 APP_DIR = Path(__file__).resolve().parent.parent
@@ -73,7 +74,7 @@ class WorkflowConfig:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
-        os.replace(temporary, path)
+        replace_with_retry(temporary, path)
 
     def path(self, name: str) -> Path:
         value = getattr(self, name)
