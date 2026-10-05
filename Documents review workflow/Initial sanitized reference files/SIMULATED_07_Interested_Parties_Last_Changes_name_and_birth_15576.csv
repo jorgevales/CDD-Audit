@@ -1,0 +1,7 @@
+﻿change_id,InterestedPartyId,InterestedPartyCurrentName,Date_of_birth,Status,ActionDateTime,ActionUserId,ActionUserName,ActionUserTeam,ChangedSections,ChangedFields,PreviousValues,NewValues,FieldChangeCount
+09001,700001,Example Person A,1980-01-15,Active,2025-01-10 10:30:00,EXAMPLE_USER_01,Example Operator,Example Team,"[""Identity""]","[""Name""]",Previous example value 1,New example value 1,1
+09002,700002,Example Person B,1981-01-15,Active,2025-01-11 10:30:00,EXAMPLE_USER_01,Example Operator,Example Team,"[""Identity""]","[""Name""]",Previous example value 2,New example value 2,1
+09003,700003,Example Person C,1982-01-15,Active,2025-01-12 10:30:00,EXAMPLE_USER_01,Example Operator,Example Team,"[""Identity""]","[""Name""]",Previous example value 3,New example value 3,1
+09101,700004,Example Person D,1983-01-15,Active,2025-01-13 10:30:00,EXAMPLE_USER_01,Example Operator,Example Team,"[""Identity""]","[""Name""]",Previous example value 4,New example value 4,1
+09102,700005,Example Person E,1984-01-15,Active,2025-01-14 10:30:00,EXAMPLE_USER_01,Example Operator,Example Team,"[""Identity""]","[""Name""]",Previous example value 5,New example value 5,1
+09103,700006,Example Person F,1985-01-15,Active,2025-01-15 10:30:00,EXAMPLE_USER_01,Example Operator,Example Team,"[""Identity""]","[""Name""]",Previous example value 6,New example value 6,1

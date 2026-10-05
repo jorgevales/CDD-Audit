@@ -1,0 +1,276 @@
+{
+  "range_from": 9001,
+  "range_to": 9200,
+  "overall_status": "PARTIAL_OR_FAILED",
+  "target_dpi": 300,
+  "max_pages_per_pdf": 100,
+  "cases_requested": 6,
+  "source_files_discovered": 31,
+  "source_records_packaged": 31,
+  "cases_successful": 5,
+  "cases_partial": 1,
+  "cases_failed": 0,
+  "related_documents": [
+    {
+      "file_name": "Change_09001_Interested_Party_700001_part_1.pdf",
+      "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09001_Interested_Party_700001_part_1.pdf",
+      "pages": 4,
+      "oversized_single_document": false,
+      "case": "Change_09001_Interested_Party_700001",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09001_Interested_Party_700001"
+    },
+    {
+      "file_name": "Change_09002_Interested_Party_700002_part_1.pdf",
+      "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09002_Interested_Party_700002_part_1.pdf",
+      "pages": 4,
+      "oversized_single_document": false,
+      "case": "Change_09002_Interested_Party_700002",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09002_Interested_Party_700002"
+    },
+    {
+      "file_name": "Change_09002_Interested_Party_700002_part_2.pdf",
+      "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09002_Interested_Party_700002_part_2.pdf",
+      "pages": 4,
+      "oversized_single_document": false,
+      "case": "Change_09002_Interested_Party_700002",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09002_Interested_Party_700002"
+    },
+    {
+      "file_name": "Change_09003_Interested_Party_700003_part_1.pdf",
+      "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09003_Interested_Party_700003_part_1.pdf",
+      "pages": 4,
+      "oversized_single_document": false,
+      "case": "Change_09003_Interested_Party_700003",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09003_Interested_Party_700003"
+    },
+    {
+      "file_name": "Change_09101_Interested_Party_700004_part_1.pdf",
+      "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09101_Interested_Party_700004_part_1.pdf",
+      "pages": 4,
+      "oversized_single_document": false,
+      "case": "Change_09101_Interested_Party_700004",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09101_Interested_Party_700004"
+    },
+    {
+      "file_name": "Change_09102_Interested_Party_700005_part_1.pdf",
+      "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09102_Interested_Party_700005_part_1.pdf",
+      "pages": 4,
+      "oversized_single_document": false,
+      "case": "Change_09102_Interested_Party_700005",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09102_Interested_Party_700005"
+    },
+    {
+      "file_name": "Change_09102_Interested_Party_700005_part_2.pdf",
+      "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09102_Interested_Party_700005_part_2.pdf",
+      "pages": 4,
+      "oversized_single_document": false,
+      "case": "Change_09102_Interested_Party_700005",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09102_Interested_Party_700005"
+    },
+    {
+      "file_name": "Change_09103_Interested_Party_700006_part_1.pdf",
+      "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09103_Interested_Party_700006_part_1.pdf",
+      "pages": 4,
+      "oversized_single_document": false,
+      "case": "Change_09103_Interested_Party_700006",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09103_Interested_Party_700006"
+    }
+  ],
+  "failed_file_count": 1,
+  "failed_file_paths": [
+    "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09003_Interested_Party_700003/sample_locked_document.pdf"
+  ],
+  "failed_files": [
+    {
+      "file_name": "sample_locked_document.pdf",
+      "relative_path": "sample_locked_document.pdf",
+      "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09003_Interested_Party_700003/sample_locked_document.pdf",
+      "extension": ".pdf",
+      "status": "PASSWORD_REQUIRED",
+      "error": "Password required but unavailable",
+      "conversion_method": "Not merged",
+      "sha256": null,
+      "case": "Change_09003_Interested_Party_700003",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09003_Interested_Party_700003"
+    }
+  ],
+  "results": [
+    {
+      "case": "Change_09001_Interested_Party_700001",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09001_Interested_Party_700001",
+      "status": "SUCCESS",
+      "source_files_discovered": 2,
+      "source_records_packaged": 2,
+      "converted_source_files": 2,
+      "source_exception_dividers": 0,
+      "output": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09001_Interested_Party_700001_part_1.pdf",
+      "outputs": [
+        "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09001_Interested_Party_700001_part_1.pdf"
+      ],
+      "related_documents": [
+        {
+          "file_name": "Change_09001_Interested_Party_700001_part_1.pdf",
+          "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09001_Interested_Party_700001_part_1.pdf",
+          "pages": 4,
+          "oversized_single_document": false
+        }
+      ],
+      "failed_files": [],
+      "failed_file_paths": [],
+      "acceptable_errors": [],
+      "seconds": 1.25
+    },
+    {
+      "case": "Change_09002_Interested_Party_700002",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09002_Interested_Party_700002",
+      "status": "SUCCESS",
+      "source_files_discovered": 12,
+      "source_records_packaged": 12,
+      "converted_source_files": 12,
+      "source_exception_dividers": 0,
+      "output": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09002_Interested_Party_700002_part_1.pdf",
+      "outputs": [
+        "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09002_Interested_Party_700002_part_1.pdf",
+        "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09002_Interested_Party_700002_part_2.pdf"
+      ],
+      "related_documents": [
+        {
+          "file_name": "Change_09002_Interested_Party_700002_part_1.pdf",
+          "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09002_Interested_Party_700002_part_1.pdf",
+          "pages": 4,
+          "oversized_single_document": false
+        },
+        {
+          "file_name": "Change_09002_Interested_Party_700002_part_2.pdf",
+          "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09002_Interested_Party_700002_part_2.pdf",
+          "pages": 4,
+          "oversized_single_document": false
+        }
+      ],
+      "failed_files": [],
+      "failed_file_paths": [],
+      "acceptable_errors": [],
+      "seconds": 1.25
+    },
+    {
+      "case": "Change_09003_Interested_Party_700003",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09003_Interested_Party_700003",
+      "status": "PARTIAL",
+      "source_files_discovered": 3,
+      "source_records_packaged": 3,
+      "converted_source_files": 2,
+      "source_exception_dividers": 1,
+      "output": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09003_Interested_Party_700003_part_1.pdf",
+      "outputs": [
+        "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09003_Interested_Party_700003_part_1.pdf"
+      ],
+      "related_documents": [
+        {
+          "file_name": "Change_09003_Interested_Party_700003_part_1.pdf",
+          "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09003_Interested_Party_700003_part_1.pdf",
+          "pages": 4,
+          "oversized_single_document": false
+        }
+      ],
+      "failed_files": [
+        {
+          "file_name": "sample_locked_document.pdf",
+          "relative_path": "sample_locked_document.pdf",
+          "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09003_Interested_Party_700003/sample_locked_document.pdf",
+          "extension": ".pdf",
+          "status": "PASSWORD_REQUIRED",
+          "error": "Password required but unavailable",
+          "conversion_method": "Not merged",
+          "sha256": null
+        }
+      ],
+      "failed_file_paths": [
+        "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09003_Interested_Party_700003/sample_locked_document.pdf"
+      ],
+      "acceptable_errors": [],
+      "seconds": 1.25
+    },
+    {
+      "case": "Change_09101_Interested_Party_700004",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09101_Interested_Party_700004",
+      "status": "SUCCESS",
+      "source_files_discovered": 1,
+      "source_records_packaged": 1,
+      "converted_source_files": 1,
+      "source_exception_dividers": 0,
+      "output": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09101_Interested_Party_700004_part_1.pdf",
+      "outputs": [
+        "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09101_Interested_Party_700004_part_1.pdf"
+      ],
+      "related_documents": [
+        {
+          "file_name": "Change_09101_Interested_Party_700004_part_1.pdf",
+          "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09101_Interested_Party_700004_part_1.pdf",
+          "pages": 4,
+          "oversized_single_document": false
+        }
+      ],
+      "failed_files": [],
+      "failed_file_paths": [],
+      "acceptable_errors": [],
+      "seconds": 1.25
+    },
+    {
+      "case": "Change_09102_Interested_Party_700005",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09102_Interested_Party_700005",
+      "status": "SUCCESS",
+      "source_files_discovered": 11,
+      "source_records_packaged": 11,
+      "converted_source_files": 11,
+      "source_exception_dividers": 0,
+      "output": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09102_Interested_Party_700005_part_1.pdf",
+      "outputs": [
+        "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09102_Interested_Party_700005_part_1.pdf",
+        "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09102_Interested_Party_700005_part_2.pdf"
+      ],
+      "related_documents": [
+        {
+          "file_name": "Change_09102_Interested_Party_700005_part_1.pdf",
+          "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09102_Interested_Party_700005_part_1.pdf",
+          "pages": 4,
+          "oversized_single_document": false
+        },
+        {
+          "file_name": "Change_09102_Interested_Party_700005_part_2.pdf",
+          "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09102_Interested_Party_700005_part_2.pdf",
+          "pages": 4,
+          "oversized_single_document": false
+        }
+      ],
+      "failed_files": [],
+      "failed_file_paths": [],
+      "acceptable_errors": [],
+      "seconds": 1.25
+    },
+    {
+      "case": "Change_09103_Interested_Party_700006",
+      "case_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Change_09103_Interested_Party_700006",
+      "status": "SUCCESS",
+      "source_files_discovered": 2,
+      "source_records_packaged": 2,
+      "converted_source_files": 2,
+      "source_exception_dividers": 0,
+      "output": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09103_Interested_Party_700006_part_1.pdf",
+      "outputs": [
+        "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09103_Interested_Party_700006_part_1.pdf"
+      ],
+      "related_documents": [
+        {
+          "file_name": "Change_09103_Interested_Party_700006_part_1.pdf",
+          "file_path": "C:/ExampleAutomation/IPs_Documents_Analysis/Temporary_100_batch_IP_files/Merged_PDFs/Change_09103_Interested_Party_700006_part_1.pdf",
+          "pages": 4,
+          "oversized_single_document": false
+        }
+      ],
+      "failed_files": [],
+      "failed_file_paths": [],
+      "acceptable_errors": [],
+      "seconds": 1.25
+    }
+  ]
+}
