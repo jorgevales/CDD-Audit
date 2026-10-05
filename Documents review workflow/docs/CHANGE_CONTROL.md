@@ -65,5 +65,7 @@ The only approved engine-output presentation difference is concise normal wake-c
 
 ## Verification status
 
-Offline unit, integration, merger and engine self-tests were executed; see `TEST_REPORT.md`. Live Microsoft 365 Copilot operation, target-VDI behavior, full regression equivalence and production performance remain subject to recorded verification.
+Offline unit, integration, merger and engine self-tests plus one authenticated synthetic Copilot case were executed; see `TEST_REPORT.md`. Live delivery is blocked by this device's organisation policy. Target-VDI behavior, full regression equivalence and production performance remain unverified.
+
+Wrapper fixes select console Python for child processes launched from pythonw, capture Tk variables on the UI thread, and retry transient atomic-replacement locks. The application also supports an explicit configuration path. Business review/retry rules and external Power Automate movement remain unchanged.
 
