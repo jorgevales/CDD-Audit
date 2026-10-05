@@ -4,6 +4,8 @@ This folder contains the portable Windows application that coordinates batch pre
 
 Start with [QUICK_START.md](docs/QUICK_START.md). The normal entry point is **Start Workflow.cmd**; first-time dependency setup uses **Setup.cmd**.
 
+The native Windows interface uses a blue navigation rail and six guided pages: source files, output folders, review and browser, run preferences, setup checks, and run activity. Settings are retained while navigating and saved with Continue or Save progress. The run action becomes available after the setup check passes; changes require another check. Office conversion, recognised-file cleanup confirmation, and the separately started master stage retain their existing behaviour.
+
 On a shared drive, each colleague double-clicks **Setup.cmd** once, then **Start Workflow.cmd**. Packages are stored separately for each Windows user under `%LOCALAPPDATA%\CDD Audit\DocumentsReviewWorkflow\envs`, with diagnostic logs in the adjacent `logs` folder. Startup verifies and repairs that user's environment when needed. Moving the project creates a separate environment; the old one is left intact.
 
 Support can create `python_path.txt` beside Setup.cmd containing the approved `python.exe` path. Relative paths are resolved from this project folder, so a shared-drive installation can use a relative path without a fixed drive letter. This configuration is ignored by Git. Alternatively, support can set the user environment variable `CDD_AUDIT_PYTHON`. Without configuration, setup checks the Windows Python launcher and PATH, then makes a bounded search of the project's drive. Python 3.10 or newer with `venv` is required; dependency compatibility is checked during installation.
