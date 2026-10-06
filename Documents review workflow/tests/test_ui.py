@@ -182,6 +182,46 @@ class GuidedInterfaceTests(unittest.TestCase):
         self.assertTrue(self.app.ui_font)
         self.assertLessEqual(self.app.top_progress.winfo_height(), 6)
 
+    def test_aptos_is_real_or_fallback_is_explained(self):
+        from tkinter import font
+        if self.app.ui_font == "Aptos":
+            for weight in ("normal", "bold"):
+                actual = font.Font(root=self.app, family=self.app.ui_font, size=11, weight=weight).actual()
+                self.assertEqual(actual["family"], "Aptos")
+                self.assertEqual(actual["weight"], weight)
+            self.assertEqual(self.app.font_warning, "")
+        else:
+            self.assertIn("Install Aptos.cmd", self.app.font_warning)
+
+    def test_run_summary_has_clear_top_and_bottom_insets(self):
+        from workflow.design import Surface
+        self.app._show_step(5)
+        self.app.update()
+        surface = next(widget for widget in self.app.parts["run"].winfo_children() if isinstance(widget, Surface))
+        for label in surface.inner.winfo_children():
+            self.assertGreaterEqual(label.winfo_rooty() - surface.winfo_rooty(), 28)
+            self.assertGreaterEqual(surface.winfo_rooty() + surface.winfo_height() -
+                                    label.winfo_rooty() - label.winfo_height(), 28)
+
+    def test_rounded_controls_keep_native_states_and_field_layouts(self):
+        from tkinter import ttk
+        style = ttk.Style(self.app)
+        for name in ("TButton", "Primary.TButton", "TEntry", "TSpinbox", "TCombobox"):
+            self.assertIn("Rounded.", str(style.layout(name)))
+        self.assertIsInstance(self.app.save_button, ttk.Button)
+        from tkinter import font
+        from workflow.design import GLYPHS
+        icon_width = font.Font(root=self.app, family=self.app.icon_font, size=19).measure(GLYPHS["save"])
+        self.assertGreaterEqual(self.app.save_button.winfo_width(), icon_width + 24)
+        primary_image = next(image for image in self.app.rounded_images
+                             if image.get(10, 10) == (16, 45, 89))
+        # Opaque parent-colour corners remain rounded with remote software rendering.
+        self.assertEqual(primary_image.get(0, 0), (245, 247, 251))
+        self.app.save_button.configure(state="disabled")
+        with patch.object(self.app.config_data, "save") as save:
+            self.app.save_button.invoke()
+            save.assert_not_called()
+
     def test_detected_user_fallback_uses_current_session(self):
         from workflow.design import detected_user
         with patch("workflow.design.os.name", "posix"), patch("workflow.design.getpass.getuser", return_value="current-analyst"):

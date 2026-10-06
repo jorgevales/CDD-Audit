@@ -56,7 +56,7 @@ class WizardView:
         self.stepper.place(relx=0.5, rely=0.5, anchor="center", width=740)
         progress_host.bind("<Configure>", lambda event: self.stepper.configure(width=min(740, event.width - 48)))
 
-        footer = ttk.Frame(self, height=92)
+        footer = ttk.Frame(self, height=104)
         footer.pack(side="bottom", fill="x")
         footer.pack_propagate(False)
         footer_inner = ttk.Frame(footer)
@@ -79,11 +79,11 @@ class WizardView:
         self.body = ttk.Frame(self)
         self.body.pack(fill="both", expand=True)
         self.hero = ttk.Frame(self.body)
-        self.hero.pack(fill="x", pady=(10, 16))
-        self.hero_icon = tk.Canvas(self.hero, width=72, height=72, bg=COLORS["background"], highlightthickness=0)
+        self.hero.pack(fill="x", pady=(8, 12))
+        self.hero_icon = tk.Canvas(self.hero, width=64, height=64, bg=COLORS["background"], highlightthickness=0)
         self.hero_icon.pack()
-        self.hero_icon.create_oval(2, 2, 70, 70, fill=COLORS["soft_blue"], outline=COLORS["soft_blue"])
-        self.hero_symbol = self.hero_icon.create_text(36, 36, font=(self.icon_font, 29), fill=COLORS["blue"])
+        self.hero_icon.create_oval(2, 2, 62, 62, fill=COLORS["soft_blue"], outline=COLORS["soft_blue"])
+        self.hero_symbol = self.hero_icon.create_text(32, 32, font=(self.icon_font, 26), fill=COLORS["blue"])
         self.title_label = ttk.Label(self.hero, style="Title.TLabel", anchor="center")
         self.title_label.pack(fill="x", pady=(11, 0))
         self.part_label = ttk.Label(self.hero, style="Small.TLabel", anchor="center")
@@ -254,15 +254,15 @@ class WizardView:
 
     def _build_run(self):
         frame = self._part_frame(5, "run")
-        surface = Surface(frame, padding=18)
+        surface = Surface(frame, padding=28)
         surface.pack(fill="x")
         self.metrics = {}
         for column, (key, label) in enumerate((("cases", "Cases"), ("tabs", "Browser tabs"), ("models", "Models"))):
             surface.inner.columnconfigure(column, weight=1, uniform="metrics")
-            ttk.Label(surface.inner, text=label, style="CardSmall.TLabel", anchor="center").grid(row=0, column=column, sticky="ew", padx=8)
+            ttk.Label(surface.inner, text=label, style="CardSmall.TLabel", anchor="center").grid(row=0, column=column, sticky="ew", padx=12, pady=(4, 0))
             value = ttk.Label(surface.inner, style="Metric.TLabel" if key != "models" else "Field.TLabel",
                               anchor="center", justify="center", wraplength=210)
-            value.grid(row=1, column=column, sticky="ew", padx=8, pady=(7, 0))
+            value.grid(row=1, column=column, sticky="ew", padx=12, pady=(10, 4))
             self.metrics[key] = value
         self.status_var = tk.StringVar(value="Not checked")
         self.status_label = ttk.Label(frame, textvariable=self.status_var, style="Small.TLabel", anchor="center", justify="center", wraplength=680)
@@ -336,6 +336,10 @@ class WizardView:
             self.step_label.configure(text=f"{index + 1} / 6")
             self.title_label.configure(text="Master workbooks" if index == 5 and self.master_mode else self.step_names[index])
             self.part_label.configure(text=f"{part + 1} / {len(self.step_parts[index])}" if index < 4 else "")
+            if index < 4:
+                self.part_label.pack(fill="x", pady=(5, 0))
+            else:
+                self.part_label.pack_forget()
             self.hero_icon.itemconfigure(self.hero_symbol, text=GLYPHS[("folder", "folder", "file", "settings", "check", "play")[index]])
             if index == 5:
                 if self.master_mode:

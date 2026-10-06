@@ -5,6 +5,9 @@ import os
 import tkinter as tk
 from tkinter import font as tkfont, ttk
 
+from .fonts import load_ui_font
+from .rounded import apply_rounded_controls
+
 COLORS = {
     "blue": "#102D59", "blue_hover": "#193E72", "paper": "#FFFFFF",
     "background": "#F5F7FB", "ink": "#10233F", "muted": "#637189",
@@ -37,8 +40,10 @@ def detected_user() -> str:
 def apply_theme(root) -> None:
     root.configure(background=COLORS["background"])
     families = set(tkfont.families(root))
-    root.ui_font = next((name for name in ("SF Pro Text", "SF Pro Display", "Helvetica Neue", "Helvetica",
-                                          "Segoe UI Variable Text", "Segoe UI") if name in families), "TkDefaultFont")
+    root.ui_font, root.font_warning = load_ui_font(root)
+    for name in tkfont.names(root):
+        tkfont.nametofont(name, root=root).configure(family=root.ui_font)
+    root.option_add("*TCombobox*Listbox.font", (root.ui_font, 11))
     root.icon_font = next((name for name in ("Segoe Fluent Icons", "Segoe MDL2 Assets") if name in families), root.ui_font)
     style = ttk.Style(root)
     style.theme_use("clam")
@@ -56,7 +61,7 @@ def apply_theme(root) -> None:
     style.configure("CardSmall.TLabel", font=(root.ui_font, 9), background=COLORS["paper"], foreground=COLORS["muted"])
     style.configure("Muted.TLabel", foreground=COLORS["muted"])
     style.configure("Small.TLabel", font=(root.ui_font, 9), foreground=COLORS["muted"])
-    style.configure("TButton", padding=(20, 12), background=COLORS["paper"],
+    style.configure("TButton", padding=(16, 5), background=COLORS["paper"],
                     bordercolor=COLORS["border"], focusthickness=2, focuscolor=COLORS["blue"])
     style.map("TButton", background=[("active", COLORS["soft_blue"])],
               foreground=[("disabled", "#8590A1")])
@@ -64,12 +69,12 @@ def apply_theme(root) -> None:
                     bordercolor=COLORS["blue"], font=(root.ui_font, 11, "bold"))
     style.map("Primary.TButton", background=[("disabled", "#DFE5EE"),
               ("active", COLORS["blue_hover"])], foreground=[("disabled", "#677488")])
-    style.configure("TEntry", padding=12, fieldbackground=COLORS["paper"],
+    style.configure("TEntry", padding=(8, 5), fieldbackground=COLORS["paper"],
                     bordercolor=COLORS["border"], lightcolor=COLORS["border"],
                     darkcolor=COLORS["border"])
     style.map("TEntry", bordercolor=[("focus", COLORS["blue"])])
-    style.configure("TSpinbox", padding=7, arrowsize=14, fieldbackground=COLORS["paper"])
-    style.configure("TCombobox", padding=7, arrowsize=14)
+    style.configure("TSpinbox", padding=(8, 3), arrowsize=14, fieldbackground=COLORS["paper"])
+    style.configure("TCombobox", padding=(8, 3), arrowsize=14)
     style.map("TCombobox", fieldbackground=[("readonly", COLORS["paper"])],
               selectbackground=[("readonly", COLORS["paper"])],
               selectforeground=[("readonly", COLORS["ink"])])
@@ -82,6 +87,7 @@ def apply_theme(root) -> None:
               foreground=[("selected", COLORS["ink"])])
     style.configure("Horizontal.TProgressbar", background=COLORS["blue"],
                     troughcolor=COLORS["background"], borderwidth=0, thickness=3)
+    apply_rounded_controls(root, style, COLORS)
 
 
 class Tooltip:
@@ -121,18 +127,15 @@ class Tooltip:
 
 
 def icon_button(parent, root, name, command, label, background=None):
-    button = tk.Button(parent, text=GLYPHS[name], command=command, font=(root.icon_font, 19),
-                       bg=background or COLORS["paper"], fg=COLORS["blue"],
-                       activebackground=COLORS["soft_blue"], activeforeground=COLORS["blue"],
-                       relief="flat", bd=0, width=2, padx=6, pady=5, cursor="hand2",
-                       highlightthickness=1, highlightbackground=background or COLORS["paper"],
-                       highlightcolor=COLORS["blue"], takefocus=True)
+    button = ttk.Button(parent, text=GLYPHS[name], command=command,
+                        style="Icon.TButton" if background else "IconCard.TButton",
+                        cursor="hand2", takefocus=True)
     Tooltip(button, label)
     return button
 
 
 class Surface(tk.Canvas):
-    def __init__(self, parent, padding=22):
+    def __init__(self, parent, padding=28):
         super().__init__(parent, bg=COLORS["background"], highlightthickness=0, height=140)
         self.padding = padding
         self.inner = ttk.Frame(self, style="Card.TFrame")
@@ -146,7 +149,7 @@ class Surface(tk.Canvas):
             self.configure(height=height)
 
     def resize(self, event):
-        w, h, r = event.width - 1, event.height - 1, 8
+        w, h, r = event.width - 1, event.height - 1, 16
         self.delete("surface")
         self.create_polygon(r, 1, w-r, 1, w, 1, w, r, w, h-r, w, h,
                             w-r, h, r, h, 1, h, 1, h-r, 1, r, 1, 1,

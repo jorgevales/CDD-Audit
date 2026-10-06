@@ -14,6 +14,7 @@ from .config import CONFIG_PATH, WorkflowConfig
 from .orchestrator import WorkflowOrchestrator
 from .preflight import Check, has_errors, run_preflight
 from .design import COLORS, apply_theme, compact_confirm
+from .fonts import release_ui_fonts
 from .setup_form import GROUPS, FIELD_SPECS, validate_field, validate_run
 from .wizard_view import WizardView
 
@@ -26,12 +27,12 @@ class App(WizardView, tk.Tk):
         self.minsize(900, 700)
         apply_theme(self)
         self.config_path = config_path
-        load_warning = ""
+        load_warning = self.font_warning
         try:
             self.config_data = WorkflowConfig.load(config_path)
         except (OSError, ValueError, TypeError, AttributeError):
             self.config_data = WorkflowConfig.defaults()
-            load_warning = "Saved settings could not be read. Review the defaults before continuing."
+            load_warning = "Saved settings could not be read. Review the defaults before continuing. " + self.font_warning
         self.vars: dict[str, tk.Variable] = {
             field.name: tk.StringVar(value=getattr(self.config_data, field.name))
             for field in fields(WorkflowConfig) if field.name != "diagnostic_mode"
@@ -448,6 +449,7 @@ class App(WizardView, tk.Tk):
         for callback in self.tk.call("after", "info"):
             self.after_cancel(callback)
         super().destroy()
+        release_ui_fonts(self)
 
 
 def run_app(config_path: Path = CONFIG_PATH) -> None:
