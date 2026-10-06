@@ -573,15 +573,7 @@ try {
     switch ($Action) {
         "Setup" {
             Use-EnvironmentLock { Ensure-Environment }
-            $fontInstaller = Join-Path $ProjectRoot "AptosFont.ps1"
-            if (Test-Path -LiteralPath $fontInstaller -PathType Leaf) {
-                & powershell.exe -NoProfile -File $fontInstaller
-                if ($LASTEXITCODE -ne 0) {
-                    throw "Python packages are ready, but Aptos installation did not finish. Double-click Install Aptos.cmd to retry, or ask IT to deploy Aptos. The app remains usable with an explicit Windows-font warning."
-                }
-            } else {
-                throw "AptosFont.ps1 is missing. Restore the project files to enable per-user Aptos installation."
-            }
+            Write-Info "The browser interface uses available Windows fonts. No font download is required."
         }
         "Start" {
             Use-EnvironmentLock { Ensure-Environment }

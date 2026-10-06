@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from .models import DEFAULT_MODEL, MODEL_VALUES
 
 # key, label, kind, guidance
 GROUPS = (
@@ -82,6 +83,8 @@ def validate_run(values: dict) -> str:
         return "Cases to review must be between 1 and the number of selected case IDs."
     if not 1 <= tabs <= 6:
         return "Choose between 1 and 6 browser tabs."
-    if values["model_policy"] not in {"1", "2", "3", "N"} or values["processing_flow"] not in {"1", "2"}:
-        return "Choose an available model policy and processing flow."
+    if values.get("default_model", DEFAULT_MODEL) not in MODEL_VALUES:
+        return "Choose an available default model."
+    if values["processing_flow"] not in {"1", "2"}:
+        return "Choose an available processing flow."
     return ""

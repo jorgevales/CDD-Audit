@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 from .files import replace_with_retry
+from .models import DEFAULT_MODEL, MODEL_OPTIONS
 
 
 APP_DIR = Path(__file__).resolve().parent.parent
@@ -35,6 +36,7 @@ class WorkflowConfig:
     cases_to_process: int = 100
     browser_tabs: int = 6
     model_policy: str = "1"
+    default_model: str = DEFAULT_MODEL
     processing_flow: str = "1"
     diagnostic_mode: bool = False
 

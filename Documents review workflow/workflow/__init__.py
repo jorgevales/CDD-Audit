@@ -1,3 +1,3 @@
 """Portable orchestration layer for the CDD document-review workflow."""
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"

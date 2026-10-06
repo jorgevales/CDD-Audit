@@ -1,50 +1,16 @@
 # Quick Start
 
-## Before you begin
+1. Run **Setup.cmd** once, then **Start Workflow.cmd**. The application opens in a local browser window. **Start Demo.cmd** uses fictional data and separate paths.
+2. Complete **Source files**, **Output folders**, and **Review & browser**. Use Browse to select local or shared-drive paths, or paste full Windows paths.
+3. In **Run preferences**, choose the case range, cases to process, and one to six Copilot tabs. Select the **Default review model** used for every case. GPT-6 Sol is selected initially; the choice is saved for later runs.
+4. Use **Check model availability** to test all six choices in your dedicated, signed-in Copilot session without sending files. Save settings and run **Check setup**. Resolve errors and review warnings. Changing settings invalidates readiness and requires another check.
+5. Open **Run activity**, review the summary, and start the document review. Save other Office work and acknowledge the conversion notice. Optional cleanup shows recognised out-of-range targets and requires typing DELETE.
+6. Keep the dedicated Copilot session signed in and the VDI unlocked. The app prepares cases, merges PDFs, and sends them through the existing visible Copilot automation. Its window is separate from the processing tabs.
+7. Use **Open results** and **Open logs** when finished. **Stop after safe stage** waits for preparation or merge to finish; during Copilot it waits for that stage to finish.
+8. When completed analysis workbooks have arrived through the team's existing background process, open **Master workbooks** and confirm the separate build. Only complete, readable 100-ID groups are built. Existing matching masters may be replaced.
 
-Use this workflow only inside the approved Windows VDI. You need access to the case folders, the two case CSV files, Microsoft Edge, Microsoft 365 Copilot, and the completed-analysis folder used by the existing background file-movement process.
+The selected model must be available in your Microsoft 365 Copilot tenant. Sign in through the dedicated Edge window if requested. The workflow must report an unavailable selection rather than silently use a different model.
 
-Save unrelated Word, Excel, and PowerPoint work before starting. Conversion opens isolated Office instances where needed, and open or locked source files can interfere with conversion. The supplied merger contains no active call that terminates unrelated Office applications.
+Settings are stored in `%LOCALAPPDATA%\CDDReviewWorkflow\config.json`, with no passwords or authentication cookies. Use the app's Close action when idle to release its local service. Do not close or terminate processing tabs during a run. Closing an interface window is not a safe stop.
 
-## First-time setup
-
-1. Open the project folder.
-2. Double-click `Setup.cmd`.
-3. Wait for dependency installation to finish. No administrator access is normally required, but corporate package or browser policy can block installation.
-4. Double-click `Start Workflow.cmd`.
-5. Complete the focused pages in **Source files**, **Output folders**, **Review & browser**, and **Run preferences**. Select the folder or search icon beside a path to browse. **Continue** saves each page; **Back** preserves selections. The small counter below the step title shows your position within that step.
-6. Select a dedicated Edge profile folder. Do not select or copy another user's Edge profile. Edge itself can be detected automatically, or selected using `msedge.exe`.
-7. On **Check setup**, select **Check setup**. Resolve every **Needs attention** result and review warnings. The details icon opens the complete results. Select a result to read its full detail.
-
-Settings are stored for the current user under `%LOCALAPPDATA%\CDDReviewWorkflow\config.json`. They do not contain passwords or Copilot authentication tokens.
-
-## Run the primary workflow
-
-1. Complete **Check setup** with no **Needs attention** results.
-2. Select **Go to run** to open **Run workflow**.
-3. Review the case count, browser-tab count and models shown above the run controls. The full case range is shown on the run-size page in **Run preferences**.
-4. To change these choices, return to **Run preferences**, then check setup again. Changes invalidate the previous readiness check.
-5. Leave temporary cleanup selected only if out-of-range temporary case folders and recognised merged PDFs should be removed. This requires typing `DELETE`.
-6. Select **Run document review**.
-7. Read the Office-conversion warning, save other Office work, and select **Continue** (or press Enter). Cleanup displays a target count, with **View files** for the file list, and still requires typing `DELETE`.
-
-The application then prepares cases, creates merged PDFs, and operates Microsoft 365 Copilot through the visible Edge interface. Edge may come to the foreground when the existing automation requires it. Do not close the dedicated Edge session, sign out, lock or disconnect the VDI, or edit source documents while the workflow is active.
-
-The status area remains authoritative if Windows toast notifications are suppressed. The activity icon opens recent events. The stop icon requests a stop after the current stage; it is not an immediate cancel. Setup controls are locked during a run. The folder icon opens results; the logs icon opens technical diagnostics. Hover or focus on an icon to see its label. Interface failures are recorded beside the user's settings under `logs/interface.log`.
-
-## Run the separate master stage
-
-Run this only after completed Copilot workbooks have appeared in the configured completed-analysis folder.
-
-1. Select the **Master workbooks** icon beside the save icon at the bottom of the window, then **Build master workbooks**. This stage remains available independently of browser readiness.
-2. Review the warning and select **Build**.
-
-The stage lists missing workbooks and creates a master only for each complete, readable 100-ID group. Existing matching batch masters may be atomically replaced after revalidation. The application does not move downloaded workbooks; that is handled by the team's established background setup.
-
-## Results and recovery
-
-- Use **Open results** for completed-analysis workbooks.
-- Use **Open logs** for the current run's logs and state.
-- If a run stops or fails, correct the reported problem and start it again. Existing engine checkpoints and status logs are used to avoid repeating successfully recorded browser work.
-- A safe-stop request takes effect after the current preparation or merge stage. During the Copilot stage it cannot interrupt the engine mid-stage.
-
+If setup fails, check shared-drive access, CSV selection, Edge detection and output permissions. If sending fails, check the dedicated Copilot sign-in, selected model access and diagnostics. Logs may contain case identifiers; follow SUPPORT_BUNDLE_GUIDE.md before sharing.

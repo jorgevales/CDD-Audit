@@ -2,7 +2,7 @@
 
 ## What the application does
 
-The CDD Document Review Workflow joins the existing case preparation, PDF conversion, Microsoft 365 Copilot, and master-workbook tools behind one Windows interface. The primary workflow runs preparation, merge, and Copilot in order. Master-workbook creation remains a separate action.
+The CDD Document Review Workflow joins the existing case preparation, PDF conversion, Microsoft 365 Copilot, and master-workbook tools behind one local browser interface. The primary workflow runs preparation, merge, and Copilot in order. Master-workbook creation remains a separate action.
 
 ## Setup screen
 
@@ -23,7 +23,7 @@ Use **Browse...** rather than typing paths where possible.
 - **Microsoft Edge executable**: optional explicit Edge path.
 - **Dedicated Edge profile**: per-user profile retaining the approved Microsoft 365 sign-in.
 
-**Restore sensible defaults** restores current-user defaults; it does not prove those paths exist. Select **Save setup** after changes.
+**Restore defaults** restores current-user defaults; it does not prove those paths exist. Select **Save settings** after changes.
 
 ## Preflight screen
 
@@ -41,7 +41,7 @@ Preflight permission probes create and remove only a dedicated `cdd_probe_*` dir
 - **100-ID batches** accepts 1 through 10.
 - **Cases this run** limits browser processing for this run.
 - **Browser tabs** accepts 1 through 6.
-- **Model policy** and **Processing flow** feed the existing browser-engine choices. Keep the team-approved values unless instructed otherwise.
+- **Default review model** applies to every case and retry. GPT-6 Sol is the initial default. Choose from the six GPT and Claude options; your Copilot tenant must expose the chosen option. **Processing flow** retains the existing browser-engine choices.
 - **Diagnostic output** shows detailed wake-cycle output. Normal mode suppresses repetitive wake messages in the UI while retaining them in the Copilot stage log.
 - **Remove out-of-range temporary cases/PDFs** enables the existing scoped cleanup. You must type `DELETE` exactly.
 
@@ -75,4 +75,3 @@ The master stage is intentionally separate. It scans the completed-analysis fold
 ## What not to share
 
 Operational logs can contain local paths and case identifiers. Follow `SUPPORT_BUNDLE_GUIDE.md` before sending diagnostics outside the approved team.
-

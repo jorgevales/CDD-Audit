@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable
 
 from .config import APP_DIR, WorkflowConfig
+from .models import validate_model
 from .notify import notify
 from .state import RunState
 
@@ -128,11 +129,12 @@ class WorkflowOrchestrator:
                 "--tabs", str(self.config.browser_tabs),
                 "--max-tabs", str(self.config.browser_tabs),
                 "--cases", str(self.config.cases_to_process),
+                "--default-model", validate_model(self.config.default_model),
             ]
             if self.config.edge_executable:
                 browser += ["--edge-path", str(self.config.path("edge_executable"))]
-            # Existing prompts: model policy, send confirmation, processing flow.
-            answers = [self.config.model_policy, "", self.config.processing_flow]
+            # A global model is supplied explicitly; only send/flow prompts remain.
+            answers = ["", self.config.processing_flow]
             self._run("copilot", browser, env=browser_env, answers=answers)
             self.state.complete(self.state_path)
             self.emit("complete", "Primary workflow completed. Copilot results were detected and logged.")

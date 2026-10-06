@@ -1,3 +1,10 @@
+# Browser interface migration - 6 October 2026
+
+The default app.py entry point now starts a loopback service and local HTML/CSS/vanilla-JavaScript interface. The old Tk code is retained for reference. Launchers continue to use the existing per-user bootstrap; Setup no longer downloads fonts. The default review model is a saved user choice, initially GPT-6 Sol, applied to all cases and retries. Copilot menu selection verifies the requested option and fails clearly if unavailable. Document conversion, batch preparation, attachment planning, result journalling and the separate master stage are retained.
+
+The historical wrapper notes below describe the earlier delivery. Current architecture and operation are documented in TECHNICAL_DESIGN.md and QUICK_START.md; current verification evidence is appended to TEST_REPORT.md.
+
+---
 # Change Control
 
 ## Delivery scope
@@ -68,4 +75,3 @@ The only approved engine-output presentation difference is concise normal wake-c
 Offline unit, integration, merger and engine self-tests plus one authenticated synthetic Copilot case were executed; see `TEST_REPORT.md`. Live delivery is blocked by this device's organisation policy. Target-VDI behavior, full regression equivalence and production performance remain unverified.
 
 Wrapper fixes select console Python for child processes launched from pythonw, capture Tk variables on the UI thread, and retry transient atomic-replacement locks. The application also supports an explicit configuration path. Business review/retry rules and external Power Automate movement remain unchanged.
-

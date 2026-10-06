@@ -40,7 +40,8 @@ class SetupValidationTests(unittest.TestCase):
         self.assertEqual(validate_run(values), "")
         for key, value in (("start_batch", 2), ("browser_tabs", 7),
                            ("batch_count", 11), ("cases_to_process", 101),
-                           ("batch_count", ""), ("model_policy", "invalid")):
+                           ("batch_count", ""), ("default_model", "invalid"),
+                           ("processing_flow", "invalid")):
             self.assertTrue(validate_run(dict(values, **{key: value})), key)
 
 

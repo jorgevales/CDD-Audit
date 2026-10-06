@@ -1021,6 +1021,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=DEFAULT_TAB_COUNT,
         help=f"number of new Copilot tabs to open (default: {DEFAULT_TAB_COUNT})",
     )
+    parser.add_argument("--default-model", default=None,
+        choices=("GPT 5.6 Sol Quick response", "GPT 5.6 Sol Think deeper", "GPT-6 Sol", "Sonnet 5.5", "Opus 5.5", "Sonnet 5"),
+        help="One selected model for every case size and every retry; no automatic model fallback.")
     parser.add_argument("--small-model", default=DEFAULT_SMALL_CASE_MODEL_NAME,
         help=f"model for Small cases (default: {DEFAULT_SMALL_CASE_MODEL_NAME!r})")
     parser.add_argument("--medium-model", default=DEFAULT_MEDIUM_CASE_MODEL_NAME,
@@ -2526,8 +2529,28 @@ async def model_selection_state(page: Page, model_name: str) -> str:
         }
     """, aliases))
 
+# App selections retain their exact version and response mode across all retries.
+GLOBAL_MODEL_SPECS = {
+    "GPT 5.6 Sol Quick response": ("OpenAI", "checkmark-Gpt_5_6_Chat", ["GPT 5.6 Sol Quick response", "GPT 5.6 Quick response", "GPT 5.6 Sol Quick"]),
+    "GPT 5.6 Sol Think deeper": ("OpenAI", "checkmark-Gpt_5_6_Reasoning", ["GPT 5.6 Sol Think deeper", "GPT 5.6 Think deeper", "GPT 5.6 Sol Think", "GPT 5.6 Think"]),
+    "GPT-6 Sol": ("OpenAI", "checkmark-Gpt_6_Sol_Reasoning", ["GPT-6 Sol", "GPT 6 Sol", "GPT 6.0 Sol", "GPT-6.0 Sol"]),
+    "Sonnet 5.5": ("Claude", "checkmark-Claude_Sonnet", ["Sonnet 5.5", "Claude Sonnet 5.5"]),
+    "Opus 5.5": ("Claude", "checkmark-Claude_Opus", ["Opus 5.5", "Claude Opus 5.5"]),
+    "Sonnet 5": ("Claude", "checkmark-Claude_Sonnet_5", ["Sonnet 5", "Sonnet 5.0", "Claude Sonnet 5", "Claude Sonnet 5.0"]),
+}
+
+
+def exact_global_model_pattern(model_name: str) -> re.Pattern[str]:
+    aliases = GLOBAL_MODEL_SPECS[model_name][2]
+    labels = [re.escape(value).replace(r"GPT\ ", r"GPT[\s\u2011\u2013-]*").replace(r"GPT\-", r"GPT[\s\u2011\u2013-]*") for value in aliases]
+    return re.compile(r"(?:" + "|".join(labels) + r")(?![\w.])", re.I)
+
+
 def exact_model_checkmark(model_name: str) -> tuple[str, str]:
     """Return the exact radio identifier for the requested model."""
+    if model_name in GLOBAL_MODEL_SPECS:
+        provider, test_id, _ = GLOBAL_MODEL_SPECS[model_name]
+        return provider, test_id
     normalized = normalize_ui_text(model_name)
     if normalized == "sonnet":
         return "Claude", "checkmark-Claude_Sonnet"
@@ -2543,6 +2566,10 @@ def exact_model_checkmark(model_name: str) -> tuple[str, str]:
 
 async def exact_nested_model_locator(page: Page, model_name: str) -> Locator:
     """Locate only the real nested GPT/Claude model radio."""
+    if model_name in GLOBAL_MODEL_SPECS:
+        # Versioned Claude IDs differ by tenant/UI rollout; visible exact labels
+        # are authoritative and never accept an unversioned Claude fallback.
+        return page.get_by_role("menuitemradio", name=exact_global_model_pattern(model_name)).first
     _, test_id = exact_model_checkmark(model_name)
     return page.locator(
         f"[role='menuitemradio']:has(svg[data-testid='{test_id}']), "
@@ -2558,6 +2585,8 @@ def collapsed_model_selector_aliases(model_name: str) -> list[str]:
     exact GPT version and reasoning mode, preventing a generic Think label from
     satisfying a different requested model.
     """
+    if model_name in GLOBAL_MODEL_SPECS:
+        return GLOBAL_MODEL_SPECS[model_name][2]
     normalized = normalize_ui_text(model_name)
     if normalized == normalize_ui_text(GPT_6_SOL_MODEL_NAME):
         return ["gpt 6.0 sol", "gpt-6.0 sol", "gpt6.0 sol"]
@@ -2580,6 +2609,13 @@ async def collapsed_model_selector_is_selected(
     model_name: str,
 ) -> bool:
     """Accept Copilot's shortened visible selector label as selected state."""
+    if model_name in GLOBAL_MODEL_SPECS:
+        return bool(await page.evaluate(r"""pattern => {
+            const sw = document.querySelector('#gptModeSwitcher,[data-testid*="gptModeSwitcher" i],[data-test-id*="gptModeSwitcher" i]');
+            if (!sw) return false;
+            const text = [sw.innerText, sw.getAttribute('aria-label')].filter(Boolean).join(' ').replace(/\s+/g, ' ');
+            return new RegExp(pattern, 'i').test(text);
+        }""", exact_global_model_pattern(model_name).pattern))
     aliases = [
         normalize_ui_text(value)
         for value in collapsed_model_selector_aliases(model_name)
@@ -2649,6 +2685,54 @@ async def model_is_selected(page: Page, model_name: str) -> bool:
     return await collapsed_model_selector_is_selected(page, model_name)
 
 
+async def click_global_model_option(page: Page, model_name: str, timeout_ms: int, verbose: bool = True) -> None:
+    """Select by versioned radio label and confirm the checked radio in the UI."""
+    provider, _, aliases = GLOBAL_MODEL_SPECS[model_name]
+    pattern = exact_global_model_pattern(model_name)
+    deadline = time.monotonic() + max(0.4, timeout_ms / 1000)
+    clicked = False
+    last_state = "model picker unavailable"
+    while time.monotonic() < deadline:
+        try:
+            state = await page.evaluate(r"""payload => {
+                const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+                const norm = value => String(value || '').replace(/[\u2011\u2013]/g, '-').replace(/\s+/g, ' ').trim();
+                const regex = new RegExp(payload.pattern, 'i');
+                const radios = [...document.querySelectorAll('[role="menuitemradio"]')];
+                const exact = radios.find(el => regex.test(norm([el.innerText, el.getAttribute('aria-label')].filter(Boolean).join(' '))));
+                if (exact && visible(exact)) {
+                    if (exact.getAttribute('aria-checked') === 'true') return 'verified';
+                    if (!payload.clicked && exact.getAttribute('aria-disabled') !== 'true' && !exact.disabled) { exact.click(); return 'clicked'; }
+                }
+                const providerNames = payload.provider === "Claude" ? ["Claude", "Anthropic"] : [payload.provider];
+                const provider = providerNames.map(name => document.querySelector(`[data-test-id="gptSubMenuModelTrigger-${name}"],[data-testid="gptSubMenuModelTrigger-${name}"]`)).find(visible);
+                if (provider && visible(provider)) {
+                    if (provider.getAttribute('aria-expanded') !== 'true') provider.click();
+                    return 'provider opened';
+                }
+                const sw = document.querySelector('#gptModeSwitcher,[data-testid*="gptModeSwitcher" i],[data-test-id*="gptModeSwitcher" i],button[aria-label*="Model Selector" i]');
+                if (sw && visible(sw)) {
+                    if (sw.getAttribute('aria-expanded') !== 'true') sw.click();
+                    return 'picker opened';
+                }
+                return 'model picker unavailable';
+            }""", {"provider": provider, "pattern": pattern.pattern, "clicked": clicked})
+            last_state = str(state)
+            if state == "verified":
+                await page.keyboard.press("Escape")
+                await page.keyboard.press("Escape")
+                if verbose:
+                    print(f"MODEL VERIFIED: {model_name}; exact version and mode radio is checked")
+                return
+            if state == "clicked":
+                clicked = True
+            await asyncio.sleep(0.025)
+        except PlaywrightError as exc:
+            last_state = concise_error(exc)
+            await asyncio.sleep(0.025)
+    raise RuntimeError(f"Selected model {model_name!r} is unavailable or could not be verified in Copilot Chat ({last_state}). No alternative model was used. Sign in to the review profile and check your model access.")
+
+
 async def click_model_option(page: Page, model_name: str, timeout_ms: int, verbose: bool = True) -> None:
     """Select the exact nested model immediately through one browser-side transaction.
 
@@ -2656,6 +2740,9 @@ async def click_model_option(page: Page, model_name: str, timeout_ms: int, verbo
     menuitemradio identified by its model checkmark. It never clicks the generic
     top-level Think deeper item and never re-clicks an already selected radio.
     """
+    if model_name in GLOBAL_MODEL_SPECS:
+        await click_global_model_option(page, model_name, timeout_ms, verbose)
+        return
     provider_id, test_id = exact_model_checkmark(model_name)
 
     aliases = [normalize_ui_text(value) for value in collapsed_model_selector_aliases(model_name)]
@@ -5672,6 +5759,8 @@ def batch_queue_label(batch: dict[str, Any]) -> str:
 
 
 def adaptive_retry_model(args: argparse.Namespace, generation: int, default_model: str) -> str:
+    if getattr(args, "default_model", None):
+        return args.default_model
     if getattr(args, "model_policy", "original") in {"sol_all", "sol_large"}:
         return effective_model_name(default_model)
     if generation < ADAPTIVE_MODEL_SWITCH_GENERATION:
@@ -6695,6 +6784,13 @@ def confirm_large_case_model(args: argparse.Namespace) -> None:
     """Choose one model policy for the run; retain the original default and No option."""
     global _OPUS_GLOBALLY_DISABLED, _OPUS_DISABLE_REASON
     print("=" * 78)
+    if getattr(args, "default_model", None):
+        args.model_policy = "selected_all"
+        args.small_model = args.medium_model = args.large_model = args.default_model
+        _OPUS_GLOBALLY_DISABLED = False
+        _OPUS_DISABLE_REASON = ""
+        print(f"MODEL POLICY: all cases and retries use {args.default_model}; automatic model fallback disabled")
+        return
     print("MODEL SELECTION FOR THIS RUN")
     print("1 or Enter: GPT 5.6 for Small/Medium; Opus for Large (original default)")
     print("2: GPT 6.0 Sol for Small, Medium and Large")
@@ -7439,6 +7535,13 @@ async def _run_single_wave(args: argparse.Namespace) -> int:
                 f"PHASE 1/3 complete: preserved {prepared_count} prepared tab(s); "
                 f"{sum(navigated_readiness)}/{len(pages_requiring_navigation)} newly navigated tab(s) ready"
             )
+        if getattr(args, "default_model", None):
+            # Fail before the first attachment or message if this tenant cannot
+            # select the user's exact model. Separate pages are safe to inspect
+            # concurrently and no additional browser tabs are created.
+            print(f"VERIFYING SELECTED MODEL BEFORE UPLOADS: {args.default_model}")
+            await asyncio.gather(*(click_model_option(page, args.default_model, FAST_MODEL_TIMEOUT_MS)
+                                   for page in pages))
         global _UPLOAD_ACCELERATOR
         _UPLOAD_ACCELERATOR = CopilotUploadAccelerator(
             pages, 'sequential option 1' if processing_flow == 'sequential' else 'legacy option 2'

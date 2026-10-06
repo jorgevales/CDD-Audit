@@ -4,7 +4,7 @@
 
 The application is designed for a managed Windows VDI and uses:
 
-- Python and the standard-library `tkinter` Windows UI;
+- a local HTML/CSS/JavaScript interface served by a Python standard-library loopback service;
 - Microsoft Edge controlled through Playwright and Chrome DevTools Protocol;
 - the visible Microsoft 365 Copilot web interface, with no Copilot or Graph API;
 - Microsoft Office COM automation and Python conversion fallbacks, with LibreOffice used where available by the preserved merger;
@@ -16,12 +16,12 @@ Authentication remains inside the user's dedicated Edge profile. Do not deploy a
 
 1. Install an organization-approved Python version containing `tkinter` and `pip`.
 2. Place the complete project folder in a user-readable location.
-3. Run `Setup.cmd` as the user. It creates `.venv` inside the project and installs the exact top-level versions in `requirements.txt`. The workflow controls the installed Microsoft Edge through CDP; it does not download a separate browser.
+3. Run `Setup.cmd` as the user. It creates a per-user virtual environment under LOCALAPPDATA and installs the exact top-level versions in `requirements.txt`. No font download is required. The workflow controls the installed Microsoft Edge through CDP; it does not download a separate browser.
 4. Run `Start Workflow.cmd` and configure paths through the UI.
 
 Current pinned top-level packages are `openpyxl 3.1.5`, `Pillow 11.3.0`, `PyMuPDF 1.26.4`, `python-docx 1.2.0`, `pywin32 311` on Windows, `reportlab 4.4.3`, and `playwright 1.55.0`.
 
-`requirements.txt` is not a fully hashed transitive lock file. For repeatable restricted deployment, validate these versions against the approved Python version, export an approved wheelhouse, and install from that internal/offline source. `Setup.cmd` requires access to the configured Python package source but isolates packages in the project `.venv`.
+`requirements.txt` is not a fully hashed transitive lock file. For repeatable restricted deployment, validate these versions against the approved Python version, export an approved wheelhouse, and install from that internal/offline source. `Setup.cmd` requires access to the configured Python package source but isolates packages in a per-user virtual environment.
 
 ## Required access
 
@@ -68,4 +68,3 @@ Before rollout, execute and record:
 7. background workbook arrival followed by incomplete and complete master batches;
 8. retry after locks, browser interruption, and transient drive loss;
 9. security review of configuration, profile, logs, and deletion boundaries.
-

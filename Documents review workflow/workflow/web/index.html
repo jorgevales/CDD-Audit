@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="workflow-token" content="__WORKFLOW_TOKEN__">
+  <meta name="color-scheme" content="light">
+  <title>Document Review · CDD Audit</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to workspace</a>
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">D<span>R</span></span><div>Document Review<small>CDD AUDIT WORKSPACE</small></div></div>
+    <div class="nav-caption">YOUR WORKFLOW</div>
+    <nav id="navigation" aria-label="Workflow steps"></nav>
+    <div class="sidebar-bottom"><button id="master-nav" class="utility">▦ &nbsp; Master workbooks</button><button id="support" class="utility">ⓘ &nbsp; Help &amp; support</button><button id="shutdown" class="utility">↪ &nbsp; Close application</button><div class="local-label"><span class="dot"></span> Local workspace <span id="version"></span></div></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><div><span class="breadcrumb">Workspace</span><span class="breadcrumb-separator">/</span><span id="breadcrumb-current">Source files</span><span id="demo-badge" class="badge" hidden>DEMO</span></div><div class="connection"><span class="dot" id="connection-dot"></span><span id="connection-label">Connecting…</span></div></header>
+    <main id="main" tabindex="-1">
+      <div class="page-heading"><div><p class="eyebrow" id="step-caption">STEP 01 / 06</p><h1 id="page-title">Set up your review</h1><p id="page-description">Connect your documents and prepare a review workspace.</p></div><button class="button secondary" id="save">Save settings</button></div>
+      <section class="model-bar" aria-label="Default review model"><div class="model-symbol">✦</div><div class="model-copy"><strong>Your default model</strong><span>Applied to every case in this run</span></div><label class="sr-only" for="default-model">Default review model</label><select id="default-model"></select><button class="button secondary" id="check-models">Check availability</button></section>
+      <section id="model-availability" class="card" aria-label="Live Copilot model availability" hidden></section>
+      <div id="notice" role="status" class="notice" hidden></div>
+      <div id="page-content"></div>
+      <footer class="page-footer"><button id="back" class="button secondary">← Back</button><span id="save-status">Settings stay on this computer</span><button id="next" class="button primary">Continue →</button></footer>
+    </main>
+    <footer class="workspace-footer"><span>DOCUMENT REVIEW WORKFLOW</span><span>Prepare. Review. Deliver.</span></footer>
+  </div>
+  <dialog id="modal" aria-labelledby="modal-title"><form method="dialog"><div class="modal-heading"><h2 id="modal-title"></h2><button aria-label="Close dialog" value="cancel" class="close">×</button></div><div id="modal-body"></div><div class="modal-actions"><button value="cancel" class="button secondary">Cancel</button><button id="modal-confirm" value="confirm" class="button primary">Continue</button></div></form></dialog>
+</body>
+</html>

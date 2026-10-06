@@ -116,11 +116,12 @@ class BrowserCommandContractTests(unittest.TestCase):
                 "--tabs": "4",
                 "--max-tabs": "4",
                 "--cases": "87",
+                "--default-model": "GPT-6 Sol",
             }.items():
                 index = command.index(option)
                 self.assertEqual(command[index + 1], expected)
 
-            self.assertEqual(answers, ["3", "", "1"])
+            self.assertEqual(answers, ["", "1"])
             self.assertEqual(
                 env["COPILOT_BASE_MESSAGE_PATH"],
                 str(REFERENCES_ROOT / "resources" / "base_message_sanitized.md"),

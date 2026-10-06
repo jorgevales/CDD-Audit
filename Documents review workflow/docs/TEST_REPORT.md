@@ -80,3 +80,36 @@ These must be validated in the approved target VDI before production acceptance.
 - The UI safe-stop request acts between primary stages. It does not interrupt the Copilot engine mid-stage.
 - Top-level dependencies are pinned, but transitive dependency hashes and an offline wheelhouse are not yet supplied.
 - A zero subprocess exit is combined with selected artifact checks, but a complete golden-output regression corpus is still required for formal behavioral equivalence.
+
+## Browser interface migration - 6 October 2026
+
+The HTML/CSS/vanilla-JavaScript interface replaces the Tk application on the default launch path. The Python document engines remain in use. No additional runtime packages were introduced.
+
+The baseline suite passed 39 tests before migration. The final full suite passed **53 tests, 0 failures, 0 skips**, in 136.670 seconds; the original browser engine self-tests also passed. The added backend suite covers real HTTP token/origin/host checks, async preflight and model checks, busy-operation exclusion, configuration readiness invalidation, cleanup boundaries, safe stop, bounded events and idle service shutdown. Model regressions cover all six requested values, initial GPT-6 Sol, exact version/mode matching and preservation through case sizes and retries with no automatic fallback.
+
+The real Edge headless acceptance script `tests/browser_smoke.py` passed: six model choices and default, persistence across reloads and pages, all six pages, normal/compact sizing, reduced motion, no page errors, stale readiness blocked after a settings edit, Escape cancellation of cleanup, lowercase delete rejection and exact DELETE accepted into an explicitly simulated workflow. This test sends no files or messages. Screenshots and the machine-readable report are under `diagnostics/web_acceptance`.
+
+After these navigation and confirmation checks, a ten-second idle sample recorded 0 API requests, 0 measured Python CPU seconds, about 0.0016 renderer task seconds and 4.91 MB JavaScript heap. Polling occurs every 15 seconds idle/background and every 1.5 seconds during active work. This is an interface-only sample, not a benchmark of six active Copilot tabs or target VDI conversion throughput. The browser and Python process also have memory overhead beyond the JavaScript heap.
+
+The service stops after a closed interface has been inactive for 120 seconds while idle. It preserves an active workflow; the explicit Close action is blocked during work. Safe stop remains a stage-boundary request.
+
+Live model checking uses one temporary Copilot tab, exact checked radio verification and per-model elapsed times, with no attachments or sends. Current availability and account evidence are in `diagnostics/model_checks.json`. Model access depends on the signed-in tenant and plan; results must be read in that account context. An on-demand Check model availability action is available in the new interface. Production case processing, complete six-tab throughput and remote-session behavior were not tested as part of this interface migration.
+
+The live check on 6 October used the signed-in Valcer work account with M365 Copilot (Basic). Its picker offered only GPT-5.6 Sol Quick response and Think deeper; both exact radio selections passed in 397 ms and 465 ms. GPT-6 Sol and the three versioned Claude choices were not offered in that account. This earlier Basic-account result did not establish FNZ availability; the subsequent FNZ sign-in and successful verification are recorded below. No documents or chat messages were sent during these checks.
+
+After resource isolation, all 11 backend tests passed again. On-demand model checks run in a short-lived subprocess, so the long-lived service does not retain Playwright or browser-engine imports. The real Start Demo.cmd launcher passed its per-user environment checks, and a visible Document Review browser window was verified on the signed-in Windows desktop.
+
+### Final FNZ model verification
+
+After the user completed FNZ sign-in, all six requested models were selected and verified through their exact versioned menu radios. The current report is status verified with the FNZ work-account session using Copilot Chat. The checker restored GPT-6 Sol and closed its temporary tab without attachments or messages.
+
+| Model | Verified selection time |
+|---|---:|
+| GPT 5.6 Sol Quick response | 444 ms |
+| GPT 5.6 Sol Think deeper | 606 ms |
+| GPT-6 Sol | 422 ms |
+| Sonnet 5.5 | 411 ms |
+| Opus 5.5 | 425 ms |
+| Sonnet 5 | 416 ms |
+
+Evidence is in diagnostics/model_checks.json. Claude 5.5 uses generic Sonnet/Opus checkmark IDs in this UI with explicit versioned radio labels; selection verifies those labels rather than treating an unversioned name as sufficient. All nine model/browser regression tests passed after reconciling the observed metadata. No sign-in or model-access blocker remains for this session.
