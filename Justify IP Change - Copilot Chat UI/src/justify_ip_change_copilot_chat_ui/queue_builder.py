@@ -41,12 +41,12 @@ def build_preflight(
             if prior and prior.status == SUCCESS:
                 summary.successful_cases += 1
                 continue
-            if prior and prior.status in REVIEW_REQUIRED and not retry_review_required:
+            # Every latest status other than successful remains eligible.  The
+            # retry flag is retained for callers from older releases, but no
+            # longer gates uncertain/sent outcomes: a later run must include
+            # every case that did not finish successfully.
+            if prior and prior.status in REVIEW_REQUIRED:
                 summary.review_required_cases += 1
-                summary.warnings.append(
-                    f"Case {record.change_id} requires operator review after an uncertain prior submission."
-                )
-                continue
             if record.canonical_key in queued_keys:
                 summary.warnings.append(f"Duplicate case {record.change_id} was omitted from the continuous queue.")
                 continue

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 from pathlib import Path
 import sys
 
 from .application import execute_queue
-from .batch_discovery import discover_batches
+from .batch_discovery import describe_batch_ranges, discover_batches
 from .case_discovery import match_batch_cases
 from .config import load_last_workspace, save_last_workspace
 from .copilot_ui import PlaywrightCopilotAdapter
@@ -44,8 +45,10 @@ def _select_workspace(args: argparse.Namespace):
     remembered = load_last_workspace()
     if not supplied:
         if remembered:
-            print(f"Last workspace: {remembered}")
-        supplied = input("Paste the path to Working Space\\Copilot resources" + (" or press Enter to reuse it" if remembered else "") + ": ").strip() or remembered
+            supplied = remembered
+            print(f"Using previously confirmed workspace: {remembered}")
+        else:
+            supplied = input("Paste the path to Working Space\\Copilot resources: ").strip()
     if not supplied:
         raise WorkspaceError("No workspace was selected.")
     resolver = LocalSimulationResolver(args.simulation_root) if args.simulation_root else WindowsSDriveResolver()
@@ -57,15 +60,17 @@ def _select_workspace(args: argparse.Namespace):
 
 def _eligible_batches(batches: list[BatchInfo], records, latest):
     eligible = []
+    completed = []
+    no_runnable = []
     for batch in batches:
         if batch.completed_by:
-            print(f"Excluded {batch.name}: completed by {batch.completed_by.name}")
+            completed.append(batch)
             continue
         matched, discovery_errors = match_batch_cases(batch, records)
         rows = [row for row, _ in matched]
         successful = sum(1 for row in rows if latest.get(row.canonical_key) and latest[row.canonical_key].status == SUCCESS)
         review = sum(1 for row in rows if latest.get(row.canonical_key) and latest[row.canonical_key].status in REVIEW_REQUIRED)
-        remaining = len(rows) - successful - review
+        remaining = len(rows) - successful
         if discovery_errors:
             print(f"WARNING {batch.name}: {len(discovery_errors)} case folder(s) are blocked by discovery errors.")
         if rows and successful == len(rows):
@@ -75,9 +80,13 @@ def _eligible_batches(batches: list[BatchInfo], records, latest):
             )
             continue
         if remaining <= 0:
-            print(f"Excluded {batch.name}: no automatically runnable cases ({successful} successful, {review} require review).")
+            no_runnable.append(batch)
             continue
         eligible.append((batch, len(rows), successful, review, remaining))
+    if completed:
+        print(describe_batch_ranges(completed, verb="are excluded because a completed Excel output exists"))
+    if no_runnable:
+        print(describe_batch_ranges(no_runnable, verb="are excluded because no automatically runnable cases remain"))
     return eligible
 
 
@@ -182,7 +191,18 @@ def main(argv=None) -> int:
         print("\nInterrupted. The active outcome was preserved where possible; remaining cases stay resumable.", file=sys.stderr)
         return 130
     except BatchLockedError as exc:
-        print(f"BATCH LOCKED: {exc}", file=sys.stderr)
+        details = str(exc)
+        try:
+            payload = json.loads(details)
+            locked = payload.get("batches", [])
+            if locked:
+                details = describe_batch_ranges(locked, verb="are locked")
+                holder = payload.get("holder")
+                if holder:
+                    details += f" Current holder: {json.dumps(holder, ensure_ascii=False, sort_keys=True)}"
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        print(f"BATCH LOCKED: {details}", file=sys.stderr)
         return 3
     except (ApplicationError, OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

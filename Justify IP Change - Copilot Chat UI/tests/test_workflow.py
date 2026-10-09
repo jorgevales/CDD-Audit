@@ -19,10 +19,10 @@ if str(SRC) not in sys.path:
 
 from justify_ip_change_copilot_chat_ui.application import execute_queue
 from justify_ip_change_copilot_chat_ui.attachments import build_attachment_plan, merged_pdf_parts
-from justify_ip_change_copilot_chat_ui.batch_discovery import completed_output_file, discover_batches
+from justify_ip_change_copilot_chat_ui.batch_discovery import batch_range_groups, completed_output_file, describe_batch_ranges, discover_batches
 from justify_ip_change_copilot_chat_ui.case_discovery import discover_case_folders, match_batch_cases
 from justify_ip_change_copilot_chat_ui.copilot_ui import CaseOutcome, SimulationAdapter
-from justify_ip_change_copilot_chat_ui.cli import parse_args, run_cli
+from justify_ip_change_copilot_chat_ui.cli import _select_workspace, parse_args, run_cli
 from justify_ip_change_copilot_chat_ui.errors import BatchLockedError, ResourceError, WorkspaceError
 from justify_ip_change_copilot_chat_ui.errors import PostSendCancelledError
 from justify_ip_change_copilot_chat_ui.identity import windows_account_name
@@ -107,6 +107,16 @@ class WorkspaceTests(unittest.TestCase):
         with self.assertRaisesRegex(WorkspaceError, "Users"):
             validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
 
+    def test_previously_confirmed_workspace_is_reused_without_prompt(self):
+        args = parse_args(["--simulation-root", self.temp.name])
+        with patch(
+            "justify_ip_change_copilot_chat_ui.cli.load_last_workspace",
+            return_value=str(self.fixture.resources),
+        ), patch("builtins.input") as prompt:
+            workspace = _select_workspace(args)
+        self.assertTrue(os.path.samefile(workspace.selected, self.fixture.resources))
+        prompt.assert_not_called()
+
     def test_all_missing_resources_reported_together(self):
         workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
         (self.fixture.resources / "base_message.md").unlink()
@@ -139,6 +149,18 @@ class BatchTests(unittest.TestCase):
         (self.fixture.root / "Not_A_Batch").mkdir()
         ranges = [(item.range_from, item.range_to) for item in discover_batches(self.fixture.root)]
         self.assertEqual(ranges, [(1, 100), (101, 200), (201, 300), (1001, 1100)])
+
+    def test_batch_range_reporting_collapses_contiguous_ranges_and_strips_padding(self):
+        names = ["Batch_01001_to_01100", "Batch_01101_to_01200", "Batch_01201_to_01300", "Batch_02001_to_02100"]
+        self.assertEqual(batch_range_groups(names), [(1001, 1300), (2001, 2100)])
+        self.assertEqual(
+            describe_batch_ranges(names, verb="are locked"),
+            "Batches 1001 to 1300, 2001 to 2100 are locked.",
+        )
+
+    def test_batch_range_reporting_omits_excel_filename(self):
+        message = describe_batch_ranges(["Batch_00001_to_00100"], verb="are excluded because a completed Excel output exists")
+        self.assertEqual(message, "Batches 1 to 100 are excluded because a completed Excel output exists.")
 
     def test_direct_ips_excel_completes_batch_case_insensitive(self):
         marker = self.fixture.batches[0] / "iPs_Completed_Analysis.XLSX"
@@ -257,10 +279,13 @@ class QueueLogAndLockTests(unittest.TestCase):
         self.assertIn(2, ids)
         self.assertIn(3, ids)
 
-    def test_uncertain_requires_explicit_retry(self):
+    def test_uncertain_latest_status_is_automatically_retried(self):
         self.log.append(self.records[0], "requires_review", batch=self.batches[0].name, attachment_count=2, run_id="run")
-        self.assertNotIn(1, {int(item.case.change_id) for item in self.preflight().queue})
-        self.assertIn(1, {int(item.case.change_id) for item in self.preflight(retry_review=True).queue})
+        self.assertIn(1, {int(item.case.change_id) for item in self.preflight().queue})
+
+    def test_sent_latest_status_is_automatically_retried(self):
+        self.log.append(self.records[0], "sent", batch=self.batches[0].name, attachment_count=2, run_id="run")
+        self.assertIn(1, {int(item.case.change_id) for item in self.preflight().queue})
 
     def test_all_success_without_output_warns_and_queues_nothing(self):
         first_batch_records = self.records[:3]
@@ -340,7 +365,7 @@ class QueueLogAndLockTests(unittest.TestCase):
         self.assertEqual(latest[report.queue[0].key].status, "interrupted")
         self.assertIn(report.queue[0].key, [item.key for item in self.preflight([self.batches[0]]).queue])
 
-    def test_post_send_interruption_requires_review_and_is_not_auto_resumed(self):
+    def test_post_send_interruption_is_review_logged_and_auto_resumed(self):
         report = self.preflight([self.batches[0]])
 
         class PostSendInterruptingAdapter(SimulationAdapter):
@@ -360,7 +385,7 @@ class QueueLogAndLockTests(unittest.TestCase):
             )
         latest = self.log.latest()
         self.assertEqual(latest[report.queue[0].key].status, "requires_review")
-        self.assertNotIn(report.queue[0].key, [item.key for item in self.preflight([self.batches[0]]).queue])
+        self.assertIn(report.queue[0].key, [item.key for item in self.preflight([self.batches[0]]).queue])
 
 
 class HundredCaseFixtureTest(unittest.TestCase):

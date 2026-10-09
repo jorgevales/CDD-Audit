@@ -18,7 +18,7 @@ Offline tests do not require `S:`, Edge, a Microsoft account, real documents, or
 
 1. From the shared `S:` project folder, double-click `Setup.cmd` once after deployment or dependency changes. It creates or repairs one locked project environment at `.venv` for all VDI users. If another setup owns the lock, the launcher says `SETUP LOCKED` and makes no competing changes.
 2. Double-click `Start Justify IP Change.cmd`.
-3. Paste or select the operational `...\Working Space\Copilot resources` path.
+3. On the first run, paste the operational `...\Working Space\Copilot resources` path. After it is confirmed, later runs reuse that validated workspace automatically; an explicit `--workspace` value can still override it.
 4. Select one or more displayed eligible batches.
 5. Review the preflight summary and enter `y` to lock the batches and start visible Edge automation.
 
@@ -83,9 +83,9 @@ The Windows account name determines the user folder:
 
 The CSV is append-only and is flushed and synced after every terminal case outcome. Existing five-column sanitized Step 08 logs remain readable and are upgraded without deleting history when a new row is added. Only the latest `successful` state excludes a case automatically. `failed` and `interrupted` cases remain eligible.
 
-An outcome whose send state or final Copilot result is uncertain is recorded as `requires_review` and is not resent automatically. After manual inspection, an operator may explicitly include it with `--retry-review-required`.
+An outcome whose send state or final Copilot result is uncertain is recorded as `requires_review` and remains eligible for the next run. Every latest status other than `successful` (`sent`, `failed`, `interrupted`, `skipped`, and review-required outcomes) is automatically included in later queues. The legacy `--retry-review-required` option remains accepted for compatibility but is no longer required.
 
-Every selected batch is locked before Edge starts. All locks are acquired as one transaction: if any batch is already locked, the application releases the locks it acquired and reports the current account, computer, start time, PID, and run ID. Lock files are stored under `Working Space\.justify-ip-change-locks`. The program releases its locks on normal completion and interruption. A lock left by a crashed machine is not silently stolen; support should verify the owner is no longer running before removing that one exact lock file.
+Every selected batch is locked before Edge starts. All locks are acquired as one transaction: if any batch is already locked, the application releases the locks it acquired and reports the locked batch ranges without leading zeroes, followed by the current holder metadata. For example, contiguous folders from `Batch_01001_to_01100` through `Batch_03001_to_03100` are reported as `Batches 1001 to 3100 are locked.` Lock files are stored under `Working Space\.justify-ip-change-locks`. The program releases its locks on normal completion and interruption. A lock left by a crashed machine is not silently stolen; support should verify the owner is no longer running before removing that one exact lock file.
 
 ## Interruption
 

@@ -103,6 +103,20 @@ class BatchLockSet:
         ]
 
     def acquire(self) -> None:
+        existing = [lock for lock in self.locks if lock.path.exists()]
+        if existing:
+            holder = {"message": "holder metadata is unreadable"}
+            try:
+                holder = json.loads(existing[0].path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+            raise BatchLockedError(
+                json.dumps(
+                    {"batches": [lock.payload["batch"] for lock in existing], "holder": holder},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
         acquired: list[ExclusiveFile] = []
         try:
             for lock in self.locks:

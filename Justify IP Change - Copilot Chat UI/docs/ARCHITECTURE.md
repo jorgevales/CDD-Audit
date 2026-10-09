@@ -35,7 +35,7 @@ Batch locks prevent cooperating instances from working on the same selected batc
 
 ## Browser safety boundary
 
-The app uses a visible, dedicated Edge profile and a loopback CDP endpoint. An existing listener must resolve to the configured profile. Send confirmation requires two independent UI observations. An ambiguous committed operation is never retried automatically. Playwright disconnects without closing the retained Edge process so the operator can inspect uncertain UI state.
+The app uses a visible, dedicated Edge profile and a loopback CDP endpoint. An existing listener must resolve to the configured profile. Send confirmation requires two independent UI observations. An ambiguous committed operation is logged as review-required and remains eligible for the next run, so no non-successful case is silently lost. Playwright disconnects without closing the retained Edge process so the operator can inspect uncertain UI state.
 
 ## Privacy boundary
 

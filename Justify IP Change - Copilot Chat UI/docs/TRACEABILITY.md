@@ -11,7 +11,7 @@ The supplied `sanitized_step_08.zip` was reviewed as a read-only reference and r
 | Prompt construction and base message | `prompting.py` | Base message and instruction attachment are loaded from `Copilot resources`; no real prompt is tracked. |
 | 20-file attachment limit | `attachments.py` | Instructions and merged parts are mandatory; deterministic originals fill spare capacity. |
 | Sent/result CSV | `logs.py` | Existing schema remains readable; append-only statuses add batch/run metadata without deleting history. |
-| Successful-case resume filter | `logs.py`, `queue_builder.py` | Only latest success completes a case; uncertainty requires explicit operator review. |
+| Successful-case resume filter | `logs.py`, `queue_builder.py` | Only latest success completes a case; every other latest status remains eligible for the next run. |
 | 100-ID batch boundary | `batch_discovery.py` | Used only for discovery/order; execution is a single cross-batch queue. |
 | Terminal progress | `progress.py` | Remaining count covers the entire selected queue and changes only after durable logging. |
 | Edge/CDP and UI selectors | `edge_session.py`, `copilot_ui.py` | Isolated, visible, bounded, profile-validated, interactive-login capable. |
