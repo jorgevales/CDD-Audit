@@ -114,10 +114,11 @@ class WorkspaceTests(unittest.TestCase):
         with patch(
             "justify_ip_change_copilot_chat_ui.cli.load_last_workspace",
             return_value=str(self.fixture.resources),
-        ), patch("builtins.input") as prompt:
+        ), patch("builtins.input") as prompt, patch("justify_ip_change_copilot_chat_ui.cli.save_last_workspace") as save:
             workspace = _select_workspace(args)
         self.assertTrue(os.path.samefile(workspace.selected, self.fixture.resources))
         prompt.assert_not_called()
+        save.assert_not_called()
 
     def test_workspace_is_available_to_error_reporting_when_remember_write_is_full(self):
         args = parse_args(["--workspace", str(self.fixture.resources)])

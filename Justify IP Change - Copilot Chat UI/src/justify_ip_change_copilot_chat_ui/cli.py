@@ -47,6 +47,7 @@ def _select_workspace(args: argparse.Namespace):
     global _LAST_WORKSPACE
     supplied = str(args.workspace) if args.workspace else ""
     remembered = load_last_workspace()
+    reused_remembered = not supplied and bool(remembered)
     if not supplied:
         if remembered:
             supplied = remembered
@@ -59,7 +60,7 @@ def _select_workspace(args: argparse.Namespace):
     workspace = validate_workspace(supplied, resolver)
     # Register the validated workspace before any remembered-config write can fail.
     _LAST_WORKSPACE = workspace
-    if not args.simulation_root:
+    if not args.simulation_root and not reused_remembered:
         try:
             save_last_workspace(workspace.selected)
         except OSError as exc:
