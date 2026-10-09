@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import csv
 import unittest
 from unittest.mock import patch
 
@@ -15,8 +16,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
-
-from openpyxl import Workbook
 
 from justify_ip_change_copilot_chat_ui.application import execute_queue
 from justify_ip_change_copilot_chat_ui.attachments import build_attachment_plan, merged_pdf_parts
@@ -79,14 +78,10 @@ class Fixture:
         self.write_workbook(self.rows)
 
     def write_workbook(self, rows) -> None:
-        workbook = Workbook()
-        sheet = workbook.active
-        sheet.title = "Synthetic cases"
-        sheet.append(list(REQUIRED_CASE_COLUMNS))
-        for row in rows:
-            sheet.append([row.get(name, "") for name in REQUIRED_CASE_COLUMNS])
-        workbook.save(self.resources / "07_Interested_Parties_Changes_15576.xlsx")
-        workbook.close()
+        with (self.resources / "07_Interested_Parties_Changes_15576.csv").open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=REQUIRED_CASE_COLUMNS, lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(rows)
 
 
 class WorkspaceTests(unittest.TestCase):
@@ -160,22 +155,22 @@ class BatchTests(unittest.TestCase):
         self.assertIsNone(completed_output_file(self.fixture.batches[0]))
 
     def test_final_batch_fewer_than_100_is_valid(self):
-        records = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")
+        records = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.csv")
         selected = [row for row in records if 101 <= int(row.change_id) <= 200]
         self.assertEqual(len(selected), 2)
 
     def test_case_folder_without_workbook_row_is_blocked(self):
         folder = self.fixture.batches[0] / "Change_00099_Interested_Party_799999"
         folder.mkdir()
-        records = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")
+        records = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.csv")
         matched, blocked = match_batch_cases(discover_batches(self.fixture.root)[0], records)
         self.assertEqual(len(matched), 3)
-        self.assertTrue(any("no matching runtime workbook row" in message for message in blocked))
+        self.assertTrue(any("no matching runtime CSV row" in message for message in blocked))
 
     def test_out_of_range_case_folder_is_blocked(self):
         folder = self.fixture.batches[0] / "Change_00101_Interested_Party_700101"
         folder.mkdir()
-        records = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")
+        records = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.csv")
         _, blocked = match_batch_cases(discover_batches(self.fixture.root)[0], records)
         self.assertTrue(any("outside the batch" in message for message in blocked))
 
@@ -191,7 +186,7 @@ class AttachmentAndWorkbookTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.fixture = Fixture(Path(self.temp.name), counts=(1,))
-        self.record = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")[0]
+        self.record = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.csv")[0]
         self.folder = self.fixture.batches[0] / self.record.folder_name
 
     def tearDown(self):
@@ -222,7 +217,7 @@ class AttachmentAndWorkbookTests(unittest.TestCase):
     def test_duplicate_workbook_case_rejected(self):
         self.fixture.write_workbook([self.fixture.rows[0], self.fixture.rows[0]])
         with self.assertRaisesRegex(ResourceError, "duplicate"):
-            load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")
+            load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.csv")
 
 
 class QueueLogAndLockTests(unittest.TestCase):
@@ -230,7 +225,7 @@ class QueueLogAndLockTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.fixture = Fixture(Path(self.temp.name))
         self.workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
-        self.records = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")
+        self.records = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.csv")
         self.batches = discover_batches(self.fixture.root)
         self.log_path = self.fixture.users / "synthetic.user" / LOG_FILENAME
         self.log = CaseLog(self.log_path, "synthetic.user")
@@ -372,7 +367,7 @@ class HundredCaseFixtureTest(unittest.TestCase):
     def test_exactly_100_cases_and_final_partial_batch(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Fixture(Path(directory), counts=(100, 7))
-            records = load_case_workbook(fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")
+            records = load_case_workbook(fixture.resources / "07_Interested_Parties_Changes_15576.csv")
             batches = discover_batches(fixture.root)
             report = build_preflight(
                 batches,

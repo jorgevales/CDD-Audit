@@ -10,7 +10,7 @@ from .paths import SharedPathResolver
 REQUIRED_RESOURCE_NAMES = (
     "IP_Review_LLM_Instructions.md",
     "base_message.md",
-    "07_Interested_Parties_Changes_15576.xlsx",
+    "07_Interested_Parties_Changes_15576.csv",
 )
 
 

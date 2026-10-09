@@ -20,9 +20,7 @@ class SharedLauncherContractTests(unittest.TestCase):
         self.assertEqual(
             pins,
             {
-                "et_xmlfile": "2.0.0",
                 "greenlet": "3.5.6",
-                "openpyxl": "3.1.5",
                 "playwright": "1.55.0",
                 "pyee": "13.0.1",
                 "typing_extensions": "4.16.0",

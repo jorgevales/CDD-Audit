@@ -45,7 +45,7 @@ def match_batch_cases(
             continue
         record = by_key.get(key)
         if record is None:
-            blocked.append(f"{batch.name} / {folder.name}: no matching runtime workbook row exists.")
+            blocked.append(f"{batch.name} / {folder.name}: no matching runtime CSV row exists.")
             continue
         matched.append((record, folder))
     matched.sort(key=lambda pair: (int(pair[0].change_id), pair[0].interested_party_id.casefold()))

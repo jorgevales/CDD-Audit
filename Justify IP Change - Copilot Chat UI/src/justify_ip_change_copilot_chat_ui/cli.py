@@ -132,7 +132,7 @@ def _print_preflight(workspace, user, log_path, report) -> None:
 def run_cli(args: argparse.Namespace) -> int:
     workspace = _select_workspace(args)
     resources = validate_runtime_resources(workspace)
-    records = load_case_workbook(resources["07_Interested_Parties_Changes_15576.xlsx"])
+    records = load_case_workbook(resources["07_Interested_Parties_Changes_15576.csv"])
     base_message = load_text_resource(resources["base_message.md"])
     # Validate the instructions as text before passing it to the visible UI.
     load_text_resource(resources["IP_Review_LLM_Instructions.md"])

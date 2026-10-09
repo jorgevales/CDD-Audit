@@ -194,7 +194,7 @@ if sys.argv[1] == 'shared':
     paths = {'running executable':sys.executable, 'base Python prefix':sys.base_prefix, 'base executable':getattr(sys,'_base_executable',sys.executable), 'standard library':sysconfig.get_path('stdlib')}
     bad = {name:value for name,value in paths.items() if not is_shared(value)}
     if bad: raise RuntimeError('Shared deployment requires the complete Python runtime on S:. Invalid runtime paths: '+repr(bad))
-expected = {'et_xmlfile':'2.0.0','greenlet':'3.5.6','openpyxl':'3.1.5','playwright':'1.55.0','pyee':'13.0.1','typing_extensions':'4.16.0'}
+expected = {'greenlet':'3.5.6','playwright':'1.55.0','pyee':'13.0.1','typing_extensions':'4.16.0'}
 for name, version in expected.items():
     package = distribution(name)
     if package.version != version: raise RuntimeError(f'{name}=={version} is required; found {package.version}.')

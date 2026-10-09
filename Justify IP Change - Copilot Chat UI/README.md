@@ -39,7 +39,7 @@ The selected folder must have this shape at any depth below the live `S:` mappin
     Copilot resources\
       IP_Review_LLM_Instructions.md
       base_message.md
-      07_Interested_Parties_Changes_15576.xlsx
+      07_Interested_Parties_Changes_15576.csv
       Temporary merged pdfs\
         Change_00001_Interested_Party_700001_part_1.pdf
     Users\
@@ -51,7 +51,7 @@ The program validates the selected final folder name, its `Working Space` parent
 
 ## Workbook and case discovery
 
-The runtime workbook must contain exactly one worksheet with the established 14 Step 08 columns. Between 1 and 1,000 rows are supported. Blank or duplicate case identifiers are rejected.
+The runtime CSV must be UTF-8 (a BOM is accepted) and contain the established 14 Step 08 columns as its header. Between 1 and 1,000 rows are supported. Blank or duplicate case identifiers are rejected.
 
 Only direct data-root folders matching `Batch_<number>_to_<number>` are treated as batches. Ranges are parsed and sorted numerically. Each case folder is matched from both `change_id` and `InterestedPartyId` using:
 

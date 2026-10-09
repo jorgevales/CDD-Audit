@@ -5,7 +5,7 @@ The supplied `sanitized_step_08.zip` was reviewed as a read-only reference and r
 | Sanitized responsibility | New location | Adaptation |
 | --- | --- | --- |
 | Launcher and package-relative resources | `app.py`, `cli.py` | Runtime resources now come only from the selected operational workspace. |
-| Source CSV and allow-list filtering | `resources.py`, `queue_builder.py` | The required XLSX is authoritative; batch selection replaces the missing allow-list. |
+| Source CSV and allow-list filtering | `resources.py`, `queue_builder.py` | The required `07_Interested_Parties_Changes_15576.csv` is authoritative; batch selection replaces the missing allow-list. |
 | `Change_<id>_Interested_Party_<id>` matching | `models.py`, `queue_builder.py` | Preserved exactly, with case-insensitive Windows fallback and ambiguity rejection. |
 | `_part_<n>.pdf` selection | `attachments.py` | Preserved and strengthened with duplicate/gap validation. |
 | Prompt construction and base message | `prompting.py` | Base message and instruction attachment are loaded from `Copilot resources`; no real prompt is tracked. |

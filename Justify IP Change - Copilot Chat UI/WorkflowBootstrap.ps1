@@ -90,7 +90,7 @@ try {
             Invoke-Checked $VenvPython @("-E", "-s", "-m", "pip", "check") "Checking package compatibility"
         } else {
             Invoke-Checked $VenvPython @("-E", "-s", "-m", "pip", "check") "Checking installed package compatibility"
-            Invoke-Checked $VenvPython @("-E", "-s", "-c", "import openpyxl, playwright; print('Required packages are available.')") "Checking required imports"
+            Invoke-Checked $VenvPython @("-E", "-s", "-c", "import csv, playwright; print('Required packages are available.')") "Checking required imports"
         }
     } finally { $lock.Dispose() }
 
