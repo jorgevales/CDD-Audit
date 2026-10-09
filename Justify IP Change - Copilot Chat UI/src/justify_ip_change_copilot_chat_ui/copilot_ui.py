@@ -80,6 +80,12 @@ class PlaywrightCopilotAdapter:
         self.browser = None
         self.context = None
         self.page = None
+        self.startup_diagnostics: dict[str, object] = {"phase": "not_started"}
+        self.case_diagnostics: dict[str, object] = {"phase": "not_started"}
+
+    @staticmethod
+    def _ready_for_queue(editor_visible: bool, picker_visible: bool | None, model_requested: bool) -> bool:
+        return editor_visible and (not model_requested or bool(picker_visible))
 
     async def _first_visible(self, selectors: tuple[str, ...], timeout: float = 0):
         deadline = time.monotonic() + timeout
@@ -95,11 +101,25 @@ class PlaywrightCopilotAdapter:
             await asyncio.sleep(0.15)
 
     async def start(self) -> None:
+        self.startup_diagnostics = {"phase": "edge_startup", "cdp_connect_attempts": 0}
+        try:
+            await self._start_impl()
+        except Exception as exc:
+            if not getattr(exc, "diagnostic_stage", None):
+                exc.diagnostic_stage = "copilot_startup"
+            diagnostics = getattr(exc, "diagnostics", {})
+            exc.diagnostics = {**diagnostics, "copilot": self.startup_diagnostics}
+            raise
+
+    async def _start_impl(self) -> None:
         self.edge.ensure_started(timeout=min(self.startup_timeout, 120))
+        self.startup_diagnostics.update(phase="playwright_start", edge_attempts=self.edge.startup_trace)
+        print("Edge endpoint ready; connecting automation.", flush=True)
         from playwright.async_api import async_playwright
 
         self.manager = async_playwright()
         self.playwright = await self.manager.start()
+        self.startup_diagnostics["phase"] = "cdp_connect"
         deadline = time.monotonic() + min(self.startup_timeout, 45)
         attempts = 0
         while time.monotonic() < deadline:
@@ -109,6 +129,7 @@ class PlaywrightCopilotAdapter:
                 budget = min((5, 10, 20)[min(attempts, 2)], deadline - time.monotonic())
                 if budget > 0:
                     attempts += 1
+                    self.startup_diagnostics["cdp_connect_attempts"] = attempts
                     try:
                         browser = await asyncio.wait_for(
                             self.playwright.chromium.connect_over_cdp(route, timeout=max(1000, int(budget * 1000))),
@@ -116,13 +137,21 @@ class PlaywrightCopilotAdapter:
                         )
                         if browser.is_connected() and browser.contexts:
                             self.browser = browser
+                            self.startup_diagnostics["cdp_context_count"] = len(browser.contexts)
                             break
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        self.startup_diagnostics["last_cdp_error_type"] = type(exc).__name__
             await asyncio.sleep(min(0.25, max(0, deadline - time.monotonic())))
         if self.browser is None:
             raise CopilotUIError("Edge opened its local endpoint, but Playwright could not connect within the startup limit.")
+        await self._activate_copilot()
+
+    async def _activate_copilot(self) -> None:
+        self.startup_diagnostics["phase"] = "profile_ownership"
+        print("Automation connected; checking the Edge profile.", flush=True)
         await asyncio.to_thread(validate_existing_profile, self.edge.port, self.edge.profile)
+        self.startup_diagnostics["phase"] = "copilot_navigation"
+        print("Edge profile verified; opening Copilot.", flush=True)
         self.context = self.browser.contexts[0]
         self.page = next(
             (
@@ -132,22 +161,34 @@ class PlaywrightCopilotAdapter:
             ),
             None,
         )
+        self.startup_diagnostics["tab_reused"] = self.page is not None
         if self.page is None:
             self.page = await self.context.new_page()
-            await self.page.goto(COPILOT_URL, wait_until="domcontentloaded", timeout=int(self.startup_timeout * 1000))
+            await self.page.goto(COPILOT_URL, wait_until="commit", timeout=min(int(self.startup_timeout * 1000), 30000))
         await self.page.bring_to_front()
         print("Edge is visible. Complete Microsoft 365 sign-in in Edge if prompted.")
+        self.startup_diagnostics["phase"] = "copilot_readiness"
         deadline = time.monotonic() + self.startup_timeout
         while time.monotonic() < deadline:
-            if await self._first_visible(EDITOR_SELECTORS) and await self._first_visible(MODEL_PICKER_SELECTORS):
+            editor_ready = bool(await self._first_visible(EDITOR_SELECTORS))
+            picker_ready = bool(await self._first_visible(MODEL_PICKER_SELECTORS)) if self.model else None
+            self.startup_diagnostics.update(
+                editor_visible=editor_ready,
+                model_picker_visible=picker_ready,
+                page_category="copilot" if urlparse(self.page.url).hostname == "m365.cloud.microsoft" else "other",
+            )
+            if self._ready_for_queue(editor_ready, picker_ready, bool(self.model)):
                 if self.model:
+                    self.startup_diagnostics["phase"] = "model_selection"
                     await self._select_model(self.model)
+                self.startup_diagnostics["phase"] = "ready"
+                print("Copilot composer ready; starting the case queue.", flush=True)
                 return
             await asyncio.sleep(0.25)
         raise CopilotUIError("Copilot did not become ready. Complete sign-in and restart the run.")
 
     async def _fresh_chat(self) -> None:
-        await self.page.goto(COPILOT_URL, wait_until="domcontentloaded", timeout=30000)
+        await self.page.goto(COPILOT_URL, wait_until="commit", timeout=30000)
         existing = self.page.locator("[data-testid='chatQuestion'],.fai-UserMessage")
         if await existing.count():
             controls = self.page.locator("button[aria-label*='New chat' i],a[aria-label*='New chat' i]")
@@ -225,9 +266,23 @@ class PlaywrightCopilotAdapter:
         return candidates[-1] if candidates else ""
 
     async def process(self, item: QueueItem) -> CaseOutcome:
+        self.case_diagnostics = {"phase": "fresh_chat", "attachment_count": len(item.attachments.paths), "send_attempted": False}
+        try:
+            return await self._process_impl(item)
+        except Exception as exc:
+            if not getattr(exc, "diagnostic_stage", None):
+                exc.diagnostic_stage = "case_processing"
+            exc.diagnostics = {**getattr(exc, "diagnostics", {}), "case": self.case_diagnostics}
+            raise
+
+    async def _process_impl(self, item: QueueItem) -> CaseOutcome:
         await self._fresh_chat()
+        self.case_diagnostics["phase"] = "attachment_upload"
         await self._attach(item)
+        self.case_diagnostics["phase"] = "composer_fill"
         editor = await self._first_visible(EDITOR_SELECTORS, 10)
+        if editor is None:
+            raise CopilotUIError("The Copilot composer disappeared before the prompt could be entered.")
         await editor.fill(item.prompt)
         actual = (await self._editor_text(editor)).replace("\r\n", "\n").strip()
         if actual != item.prompt.strip():
@@ -236,6 +291,7 @@ class PlaywrightCopilotAdapter:
         if send is None or not await send.is_enabled():
             raise CopilotUIError("The Copilot Send control is not ready.")
         try:
+            self.case_diagnostics.update(phase="send_confirmation", send_attempted=True)
             # From this point onward, every failure is potentially post-send and
             # must never be treated as an automatically retryable ordinary error.
             await send.click(no_wait_after=True)
@@ -250,6 +306,7 @@ class PlaywrightCopilotAdapter:
                 await asyncio.sleep(0.2)
             if not committed:
                 raise SubmissionUncertainError("Send was attempted, but a cleared composer and matching user turn were not both observed.")
+            self.case_diagnostics["phase"] = "response_capture"
             deadline = time.monotonic() + self.response_timeout
             stable_text = ""
             stable = 0

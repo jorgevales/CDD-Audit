@@ -19,6 +19,19 @@ ERROR_LOG_FOLDER = "Error logs"
 _WINDOWS_PATH = re.compile(r"(?i)(?:[a-z]:[\\/]|\\\\)[^\r\n\"']+")
 _UNC_OR_LOCAL = re.compile(r"(?i)\b(?:[a-z]:\\|\\\\)[^\s,;]+")
 _POSIX_PATH = re.compile(r"(?<![A-Za-z0-9])/(?:[^\s,;:/]+/)+[^\s,;]+")
+_SAFE_TOKEN = re.compile(r"^[A-Za-z][A-Za-z0-9_ -]{0,79}$")
+_DIAGNOSTIC_VALUES = {
+    "not_started", "edge_startup", "playwright_start", "cdp_connect", "profile_ownership",
+    "copilot_navigation", "copilot_readiness", "model_selection", "ready", "fresh_chat",
+    "attachment_upload", "composer_fill", "send_confirmation", "response_capture",
+    "existing_endpoint", "dedicated profile and requested port", "dedicated profile and alternate port",
+    "fresh run profile and alternate port", "validated", "rejected", "absent", "policy_blocked", "failed", "exception",
+    "none", "endpoint_unavailable", "local endpoint rejected its Edge identity or address",
+    "Edge process exited without a local debugging endpoint",
+    "Edge did not open a local debugging endpoint within the attempt limit",
+    "dedicated profile already in use", "requested local port already in use", "copilot", "other",
+}
+_STAGES = {"edge_startup", "copilot_startup", "copilot_shutdown", "case_processing", "workspace_remember", "batch_lock", "cli_failure", "operator_interrupt"}
 
 
 def pseudonym(value: str, *, namespace: str) -> str:
@@ -34,6 +47,37 @@ def sanitize_message(value: object) -> str:
     text = re.sub(r"(?i)\b(?:https?|file)://[^\s]+", "<url>", text)
     text = re.sub(r"\b[A-Za-z0-9_.-]+@[A-Za-z0-9.-]+\b", "<account>", text)
     return text[:2000]
+
+
+def _safe_diagnostics(value: object, depth: int = 0) -> object:
+    """Accept only bounded, non-identifying telemetry; discard arbitrary strings."""
+    if depth > 5:
+        return None
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return value if value in _DIAGNOSTIC_VALUES or re.fullmatch(r"[A-Za-z]+(?:Error|Exception|Timeout)", value) else "<redacted>"
+    if isinstance(value, (list, tuple)):
+        return [_safe_diagnostics(item, depth + 1) for item in value[:12]]
+    if isinstance(value, dict):
+        return {
+            key: _safe_diagnostics(item, depth + 1)
+            for key, item in list(value.items())[:24]
+            if isinstance(key, str) and _SAFE_TOKEN.fullmatch(key)
+        }
+    return None
+
+
+def _safe_frames(exc: BaseException) -> list[dict[str, object]]:
+    frames = traceback.extract_tb(exc.__traceback__)
+    return [
+        {"module": "app" if "justify_ip_change_copilot_chat_ui" in frame.filename else "dependency",
+         "function": frame.name if _SAFE_TOKEN.fullmatch(frame.name) else "<redacted>",
+         "line": frame.lineno}
+        for frame in frames[-12:]
+    ]
 
 
 def write_error_report(
@@ -53,15 +97,18 @@ def write_error_report(
         target.mkdir(parents=True, exist_ok=True)
         account = os.environ.get("USERNAME") or os.environ.get("USER") or "unknown-user"
         device = os.environ.get("COMPUTERNAME") or socket.gethostname() or "unknown-device"
-        safe_message = sanitize_message(exc).replace(account, "<user>").replace(device, "<device>")
-        safe_traceback = sanitize_message("".join(traceback.format_exception(exc))).replace(account, "<user>").replace(device, "<device>")
+        safe_message = "Failure details are in the structured stage, diagnostics, and error type; raw exception text is omitted."
+        diagnostic_stage = getattr(exc, "diagnostic_stage", stage)
+        if diagnostic_stage not in _STAGES:
+            diagnostic_stage = stage
         report = {
             "schema": "cdd-audit-error-report-v1",
             "report_id": str(uuid.uuid4()),
             "occurred_at_utc": datetime.now(timezone.utc).isoformat(),
             "action": action,
-            "stage": stage,
+            "stage": diagnostic_stage,
             "error_type": type(exc).__name__,
+            "error_ref": pseudonym(f"{type(exc).__name__}:{exc}", namespace="error"),
             "message": safe_message,
             "user_ref": pseudonym(account, namespace="user"),
             "device_ref": pseudonym(device, namespace="device"),
@@ -72,7 +119,10 @@ def write_error_report(
             "python": f"{os.sys.version_info.major}.{os.sys.version_info.minor}",
             "process_id": os.getpid(),
             "free_space_bytes": _free_space_snapshot(workspace),
-            "traceback": safe_traceback[:4000],
+            "diagnostics": _safe_diagnostics(getattr(exc, "diagnostics", {})),
+            "frames": _safe_frames(exc),
+            "cause_types": [type(item).__name__ for item in (exc.__cause__, exc.__context__) if item is not None],
+            "os_error": {"errno": getattr(exc, "errno", None), "winerror": getattr(exc, "winerror", None)},
             "support_note": "Correlate occurred_at_utc with user_ref and device_ref; raw paths and identifiers are intentionally omitted.",
         }
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
@@ -83,8 +133,11 @@ def write_error_report(
             try:
                 temporary.write_text(payload, encoding="utf-8")
                 os.replace(temporary, path)
-                return path
-            except OSError:
+                saved = json.loads(path.read_text(encoding="utf-8"))
+                if all(key in saved for key in ("stage", "error_type", "diagnostics", "frames", "user_ref", "device_ref")):
+                    return path
+                path.unlink(missing_ok=True)
+            except (OSError, ValueError):
                 temporary.unlink(missing_ok=True)
                 if attempt == 0:
                     _prune_old_reports(target)

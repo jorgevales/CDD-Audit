@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import sys
 
 from .copilot_ui import CopilotAdapter
 from .errors import CopilotUIError, PostSendCancelledError, SubmissionUncertainError
@@ -93,5 +94,12 @@ async def execute_queue(
                 review += status in {"requires_review", "inconclusive_review_needed"}
                 progress.recorded(f"last outcome: {status}")
         finally:
-            await adapter.close()
+            pending_error = sys.exc_info()[1]
+            try:
+                await adapter.close()
+            except Exception as close_error:
+                close_error.diagnostic_stage = "copilot_shutdown"
+                write_error_report(workspace, close_error, stage="copilot_shutdown", run_id=run_id)
+                if pending_error is None:
+                    raise
     return RunResult(processed, successful, failed, review)

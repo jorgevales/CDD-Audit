@@ -134,7 +134,7 @@ The suite covers deep paths with spaces, simulated drive resolution, required re
 ## Troubleshooting
 
 - **Setup did not finish:** copy the exact diagnostic log path printed at launcher startup. Logs exist before Python discovery begins.
-- **Support error reports:** inspect `Working Space\Error logs`. Correlate `occurred_at_utc`, `user_ref`, and `device_ref` to identify the VDI run without exposing account names or system paths.
+- **Support error reports:** inspect `Working Space\Error logs`. New reports include a verified JSON payload with a failure stage, a bounded Edge/CDP/Copilot or case-processing phase timeline, attempt counts and elapsed times, safe error types, source function/line references without file paths, and free-space readings. Raw exception text, document text, URLs, direct system paths, account names, and device names are omitted. Correlate `occurred_at_utc`, `user_ref`, and `device_ref` to identify the VDI run. A file containing only a schema and report ID is incomplete and cannot diagnose the underlying failure.
 - **`Error 28` / no space left:** the confirmed workspace is registered before local settings are written; the report writer retries atomically after pruning only old error reports. Check its `free_space_bytes` labels to distinguish workspace-share, local-temp, and local-appdata capacity.
 - **`SETUP LOCKED`:** another user is setting up the shared project, or the project is not writable. Wait for that setup to finish and retry.
 - **Python rejected on S:** use a complete Python 3.10+ installation on `S:`; a local interpreter is deliberately rejected for shared deployment.
@@ -143,7 +143,7 @@ The suite covers deep paths with spaces, simulated drive resolution, required re
 - **Missing resources:** the preflight reports all missing required paths together.
 - **Batch locked:** read the reported holder details. Do not delete a live user's lock.
 - **Ambiguous attachment:** correct duplicate/gapped `_part_<n>.pdf` files; the application will not guess.
-- **Copilot login:** complete login/MFA in visible Edge and restart if readiness times out.
+- **Copilot login:** complete login/MFA in visible Edge and restart if readiness times out. With no explicit `--model`, the app moves to the case queue as soon as the composer is visible; it does not wait for a model picker. If `--model` was requested, both must be visible before selection.
 - **Edge debugging endpoint timeout:** startup first reuses a validated retained endpoint; otherwise it checks the effective Edge debugging policy, gives the VDI-confirmed dedicated-profile/requested-port method at most 6 seconds, then tries an alternate port and a fresh dedicated profile only if necessary. Failures identify the observed condition for each attempt. A successful method is printed as a short green terminal line.
 - **Edge cannot write profile data:** close only a stale CDD Audit Edge window if present and retry. The launcher now detects an owned profile/port before launch and uses a machine-scoped detached profile to avoid collisions with ordinary Edge.
 - **Selector failure:** retain the terminal error and per-user bootstrap diagnostic path; do not repeatedly submit the case manually without checking its log state.

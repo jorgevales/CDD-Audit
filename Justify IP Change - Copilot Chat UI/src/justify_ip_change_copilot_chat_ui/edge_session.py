@@ -115,10 +115,12 @@ class EdgeSession:
     def __init__(self, profile: Path, port: int = 9445, edge_path: Path | None = None) -> None:
         self.profile = profile.expanduser().resolve()
         self.port = port
+        self.requested_port = port
         self.edge_path = edge_path
         self.endpoint = cdp_endpoint(port)
         self.process: subprocess.Popen | None = None
         self.last_failure = ""
+        self.startup_trace: list[dict[str, object]] = []
 
     @staticmethod
     def _free_port(preferred: int, excluded: set[int]) -> int:
@@ -256,18 +258,35 @@ class EdgeSession:
         return False
 
     def ensure_started(self, timeout: float = 90.0) -> None:
+        self.startup_trace = []
+        try:
+            self._ensure_started(timeout)
+        except Exception as exc:
+            exc.diagnostic_stage = "edge_startup"
+            exc.diagnostics = {
+                "requested_port": self.requested_port,
+                "selected_port": self.port,
+                "attempts": self.startup_trace,
+                "last_failure": self.last_failure or "none",
+            }
+            raise
+
+    def _ensure_started(self, timeout: float) -> None:
         started_at = time.monotonic()
         attempted_ports: set[int] = set()
         if remote_debugging_blocked():
+            self.startup_trace.append({"method": "existing_endpoint", "result": "policy_blocked"})
             raise CopilotUIError("Microsoft Edge policy disables remote debugging. Ask IT to enable it for this application.")
         try:
             payload = get_cdp_version(self.endpoint)
             if payload:
                 validate_existing_profile(self.port, self.profile)
+                self.startup_trace.append({"method": "existing_endpoint", "result": "validated", "port": self.port})
                 print("\033[92mEdge startup method: existing validated endpoint\033[0m")
                 return
-        except CopilotUIError:
-            pass
+            self.startup_trace.append({"method": "existing_endpoint", "result": "absent", "port": self.port})
+        except CopilotUIError as exc:
+            self.startup_trace.append({"method": "existing_endpoint", "result": "rejected", "reason": type(exc).__name__})
 
         requested_profile = self.profile
         methods = (
@@ -282,7 +301,26 @@ class EdgeSession:
             port = requested_port if requested_port is not None else self._free_port(self.port, attempted_ports)
             attempted_ports.add(port)
             remaining = max(0.1, min(budget, timeout - (time.monotonic() - started_at)))
-            if self._launch_attempt(profile, port, remaining):
+            attempt_start = time.monotonic()
+            try:
+                succeeded = self._launch_attempt(profile, port, remaining)
+            except Exception as exc:
+                self.startup_trace.append({
+                    "method": method,
+                    "result": "exception",
+                    "port": port,
+                    "elapsed_ms": round((time.monotonic() - attempt_start) * 1000),
+                    "reason": type(exc).__name__,
+                })
+                raise
+            self.startup_trace.append({
+                "method": method,
+                "result": "ready" if succeeded else "failed",
+                "port": port,
+                "elapsed_ms": round((time.monotonic() - attempt_start) * 1000),
+                "reason": "none" if succeeded else self.last_failure or "endpoint_unavailable",
+            })
+            if succeeded:
                 print(f"\033[92mEdge startup method: {method}\033[0m")
                 return
             failures.append(f"{method}: {self.last_failure or 'endpoint unavailable'}")

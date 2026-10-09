@@ -8,8 +8,9 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -133,6 +134,29 @@ class EdgeSessionTests(unittest.TestCase):
             with patch.object(session, "close_owned") as retain:
                 asyncio.run(adapter.close())
             retain.assert_called_once_with()
+
+    def test_unselected_model_does_not_delay_ready_composer(self):
+        ready = PlaywrightCopilotAdapter._ready_for_queue
+        self.assertTrue(ready(True, None, False))
+        self.assertFalse(ready(True, None, True))
+        self.assertTrue(ready(True, True, True))
+
+    def test_connected_edge_reuses_tab_and_immediately_starts_without_model_picker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
+            adapter = PlaywrightCopilotAdapter(session)
+            page = SimpleNamespace(url="https://m365.cloud.microsoft/chat", bring_to_front=AsyncMock())
+            context = SimpleNamespace(pages=[page], new_page=AsyncMock())
+            adapter.browser = SimpleNamespace(contexts=[context])
+            with patch("justify_ip_change_copilot_chat_ui.copilot_ui.validate_existing_profile"), patch.object(
+                adapter, "_first_visible", new=AsyncMock(return_value=object())
+            ) as visible:
+                asyncio.run(adapter._activate_copilot())
+            context.new_page.assert_not_awaited()
+            page.bring_to_front.assert_awaited_once()
+            visible.assert_awaited_once()
+            self.assertEqual(adapter.startup_diagnostics["phase"], "ready")
+            self.assertTrue(adapter.startup_diagnostics["tab_reused"])
 
     def test_explicit_edge_policy_block_stops_before_launch(self):
         with tempfile.TemporaryDirectory() as directory:

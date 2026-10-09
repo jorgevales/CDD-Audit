@@ -23,7 +23,7 @@ from justify_ip_change_copilot_chat_ui.attachments import build_attachment_plan,
 from justify_ip_change_copilot_chat_ui.batch_discovery import batch_range_groups, completed_output_file, describe_batch_ranges, discover_batches
 from justify_ip_change_copilot_chat_ui.case_discovery import discover_case_folders, match_batch_cases
 from justify_ip_change_copilot_chat_ui.copilot_ui import CaseOutcome, SimulationAdapter
-from justify_ip_change_copilot_chat_ui.cli import _eligible_batches, _select_workspace, parse_args, run_cli
+from justify_ip_change_copilot_chat_ui.cli import _eligible_batches, _select_workspace, main, parse_args, run_cli
 from justify_ip_change_copilot_chat_ui.errors import BatchLockedError, ResourceError, WorkspaceError
 from justify_ip_change_copilot_chat_ui.error_reporting import sanitize_message, write_error_report
 from justify_ip_change_copilot_chat_ui.errors import PostSendCancelledError
@@ -163,6 +163,36 @@ class WorkspaceTests(unittest.TestCase):
         self.assertNotIn("C:\\Users", text)
         self.assertNotIn("Jane Doe", text)
         self.assertNotIn("VDI-01", text)
+        self.assertIn("diagnostics", payload)
+        self.assertIn("frames", payload)
+        self.assertIn("error_ref", payload)
+        self.assertNotIn("traceback", payload)
+
+    def test_error_report_keeps_safe_stage_details_and_discards_raw_values(self):
+        workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
+        error = RuntimeError(r"private name and C:\Users\Jane Doe\secret.txt")
+        error.diagnostic_stage = "copilot_startup"
+        error.diagnostics = {"copilot": {"phase": "copilot_readiness", "cdp_connect_attempts": 2, "raw": r"C:\Users\Jane Doe\secret.txt"}}
+        path = write_error_report(workspace, error, stage="cli_failure")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["stage"], "copilot_startup")
+        self.assertEqual(payload["diagnostics"]["copilot"]["phase"], "copilot_readiness")
+        self.assertEqual(payload["diagnostics"]["copilot"]["cdp_connect_attempts"], 2)
+        self.assertEqual(payload["diagnostics"]["copilot"]["raw"], "<redacted>")
+        self.assertNotIn("Jane Doe", path.read_text(encoding="utf-8"))
+
+    def test_unexpected_startup_failure_still_creates_complete_report(self):
+        workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
+        with patch("justify_ip_change_copilot_chat_ui.cli.run_cli", side_effect=RuntimeError("private exception data")), patch(
+            "justify_ip_change_copilot_chat_ui.cli._LAST_WORKSPACE", workspace
+        ), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main([]), 1)
+        reports = list((self.fixture.working / "Error logs").glob("error_*.json"))
+        self.assertEqual(len(reports), 1)
+        payload = json.loads(reports[0].read_text(encoding="utf-8"))
+        self.assertEqual(payload["stage"], "cli_failure")
+        self.assertIn("frames", payload)
+        self.assertNotIn("private exception data", reports[0].read_text(encoding="utf-8"))
 
 
 class BatchTests(unittest.TestCase):

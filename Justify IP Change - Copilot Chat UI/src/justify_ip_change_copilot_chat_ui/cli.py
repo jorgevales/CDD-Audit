@@ -219,9 +219,10 @@ def main(argv=None) -> int:
         if report_path:
             print("Support error report saved under the workspace Error logs folder.", file=sys.stderr)
         return 3
-    except (ApplicationError, OSError, ValueError) as exc:
+    except Exception as exc:
         report_path = write_error_report(_LAST_WORKSPACE, exc, stage="cli_failure")
-        print(f"ERROR: {exc}", file=sys.stderr)
+        detail = str(exc) if isinstance(exc, ApplicationError) else f"{type(exc).__name__} during the run"
+        print(f"ERROR: {detail}", file=sys.stderr)
         if report_path:
             print("Support error report saved under the workspace Error logs folder.", file=sys.stderr)
         return 1
