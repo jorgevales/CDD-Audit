@@ -135,6 +135,7 @@ The suite covers deep paths with spaces, simulated drive resolution, required re
 
 - **Setup did not finish:** copy the exact diagnostic log path printed at launcher startup. Logs exist before Python discovery begins.
 - **Support error reports:** inspect `Working Space\Error logs`. Correlate `occurred_at_utc`, `user_ref`, and `device_ref` to identify the VDI run without exposing account names or system paths.
+- **`Error 28` / no space left:** the confirmed workspace is registered before local settings are written; the report writer retries atomically after pruning only old error reports. Check its `free_space_bytes` labels to distinguish workspace-share, local-temp, and local-appdata capacity.
 - **`SETUP LOCKED`:** another user is setting up the shared project, or the project is not writable. Wait for that setup to finish and retry.
 - **Python rejected on S:** use a complete Python 3.10+ installation on `S:`; a local interpreter is deliberately rejected for shared deployment.
 - **Invalid workspace:** select `Working Space\Copilot resources`, not the data root or source folder.

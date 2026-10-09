@@ -119,6 +119,16 @@ class WorkspaceTests(unittest.TestCase):
         self.assertTrue(os.path.samefile(workspace.selected, self.fixture.resources))
         prompt.assert_not_called()
 
+    def test_workspace_is_available_to_error_reporting_when_remember_write_is_full(self):
+        args = parse_args(["--workspace", str(self.fixture.resources)])
+        with patch("justify_ip_change_copilot_chat_ui.cli.WindowsSDriveResolver", return_value=LocalSimulationResolver(Path(self.temp.name))), patch(
+            "justify_ip_change_copilot_chat_ui.cli.save_last_workspace", side_effect=OSError(28, "No space left on device")
+        ), patch("justify_ip_change_copilot_chat_ui.cli.write_error_report", return_value=self.fixture.working / "Error logs" / "error.json") as report:
+            workspace = _select_workspace(args)
+        self.assertTrue(os.path.samefile(workspace.selected, self.fixture.resources))
+        report.assert_called_once()
+        self.assertEqual(report.call_args.kwargs["stage"], "workspace_remember")
+
     def test_all_missing_resources_reported_together(self):
         workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
         (self.fixture.resources / "base_message.md").unlink()
@@ -148,6 +158,7 @@ class WorkspaceTests(unittest.TestCase):
         text = path.read_text(encoding="utf-8")
         self.assertEqual(payload["schema"], "cdd-audit-error-report-v1")
         self.assertEqual(payload["stage"], "edge_startup")
+        self.assertEqual(set(payload["free_space_bytes"]), {"workspace_volume", "local_temp_volume", "local_appdata_volume"})
         self.assertNotIn("C:\\Users", text)
         self.assertNotIn("Jane Doe", text)
         self.assertNotIn("VDI-01", text)

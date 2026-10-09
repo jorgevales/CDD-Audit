@@ -159,6 +159,14 @@ function Remove-SafeGeneratedArtifacts {
             Remove-Item -LiteralPath $cache.FullName -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+    foreach ($root in @((Join-Path $ProjectRoot '.setup-logs'), (Join-Path ([System.IO.Path]::GetTempPath()) 'JustifyIPChange-SetupLogs'))) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $root -File -Force -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 0 })) {
+            if ($file.LastWriteTime -lt (Get-Date).AddDays(-14) -and (($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0)) {
+                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
     Remove-IncompleteEnvironments
 }
 

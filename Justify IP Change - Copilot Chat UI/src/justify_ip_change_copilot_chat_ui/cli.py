@@ -44,6 +44,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 def _select_workspace(args: argparse.Namespace):
+    global _LAST_WORKSPACE
     supplied = str(args.workspace) if args.workspace else ""
     remembered = load_last_workspace()
     if not supplied:
@@ -56,8 +57,16 @@ def _select_workspace(args: argparse.Namespace):
         raise WorkspaceError("No workspace was selected.")
     resolver = LocalSimulationResolver(args.simulation_root) if args.simulation_root else WindowsSDriveResolver()
     workspace = validate_workspace(supplied, resolver)
+    # Register the validated workspace before any remembered-config write can fail.
+    _LAST_WORKSPACE = workspace
     if not args.simulation_root:
-        save_last_workspace(workspace.selected)
+        try:
+            save_last_workspace(workspace.selected)
+        except OSError as exc:
+            report_path = write_error_report(workspace, exc, stage="workspace_remember")
+            print("WARNING: the confirmed workspace could not be remembered; continuing with this run.", file=sys.stderr)
+            if report_path:
+                print("Support error report saved under the workspace Error logs folder.", file=sys.stderr)
     return workspace
 
 
