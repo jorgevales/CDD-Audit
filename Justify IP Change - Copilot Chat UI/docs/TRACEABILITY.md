@@ -17,6 +17,7 @@ The supplied `sanitized_step_08.zip` was reviewed as a read-only reference and r
 | Edge/CDP and UI selectors | `edge_session.py`, `copilot_ui.py` | Isolated, visible, profile-validated, interactive-login capable; bounded startup retries cover the existing endpoint, alternate port, and fresh run profile with green method telemetry. |
 | Inline self-tests | `tests/test_workflow.py` | Replaced by synthetic unit and integration-style tests. |
 | Setup diagnostics | `.setup-logs/<Windows-account>` with `%TEMP%` fallback | Logging begins before interpreter discovery and captures native setup output. The ignored shared folder makes failures supportable without tracking logs. |
+| Sanitized runtime error reports | `error_reporting.py`, `Working Space/Error logs` | Structured, workspace-local JSON reports retain stage/timing/error detail and pseudonymous user/device/workspace correlation without raw paths or identifiers. |
 
 ## Reviewed secondary reference
 

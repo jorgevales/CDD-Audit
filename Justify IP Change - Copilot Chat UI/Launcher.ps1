@@ -143,6 +143,25 @@ function Remove-IncompleteEnvironments {
     }
 }
 
+function Remove-SafeGeneratedArtifacts {
+    # Only remove generated artifacts owned by this project; never touch operational data.
+    $cutoff = (Get-Date).AddDays(-14)
+    foreach ($root in @((Join-Path $ProjectRoot '.setup-logs'), (Join-Path ([System.IO.Path]::GetTempPath()) 'JustifyIPChange-SetupLogs'))) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $root -File -Force -Recurse -Filter '*.log' -ErrorAction SilentlyContinue)) {
+            if ($file.LastWriteTime -lt $cutoff -and (($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0)) {
+                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    foreach ($cache in @(Get-ChildItem -LiteralPath $ProjectRoot -Directory -Force -Recurse -Filter '__pycache__' -ErrorAction SilentlyContinue)) {
+        if (($cache.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) {
+            Remove-Item -LiteralPath $cache.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Remove-IncompleteEnvironments
+}
+
 function Assert-Runtime([string]$Python, [bool]$RequireShared) {
     $mode = if ($RequireShared) { 'shared' } else { 'development' }
     $probe = @'
@@ -251,6 +270,8 @@ function Initialize-Environment([string]$BasePython) {
 }
 
 try {
+    Remove-SafeGeneratedArtifacts
+    Write-RunLog 'Safe pre-launch cleanup completed (project-owned generated artifacts only).'
     $environmentPython = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
     if ($Action -eq 'Setup') {
         $basePython = Find-Python $ProductionShare

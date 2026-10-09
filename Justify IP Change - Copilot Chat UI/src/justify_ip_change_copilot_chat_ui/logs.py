@@ -11,6 +11,7 @@ import time
 import uuid
 
 from .errors import ApplicationError, BatchLockedError
+from .error_reporting import sanitize_message
 from .models import CaseRecord, canonical_identifier
 
 
@@ -192,7 +193,7 @@ class CaseLog:
             raise ValueError(f"Unsupported log status: {status}")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # Keep diagnostics concise and content-free.
-        safe_detail = " ".join(detail.split())[:500]
+        safe_detail = sanitize_message(" ".join(detail.split()))[:500]
         with self.lock:
             exists = self.path.exists() and self.path.stat().st_size > 0
             fields = list(LOG_FIELDS)

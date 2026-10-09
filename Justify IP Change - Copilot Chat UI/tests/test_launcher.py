@@ -46,6 +46,8 @@ class SharedLauncherContractTests(unittest.TestCase):
             "[System.IO.Path]::GetTempPath()",
             "distribution(pip.__name__)",
             "[System.Management.Automation.ErrorRecord]",
+            "Remove-SafeGeneratedArtifacts",
+            "project-owned generated artifacts only",
         ):
             self.assertIn(required, source)
         self.assertNotIn("LOCALAPPDATA", source)

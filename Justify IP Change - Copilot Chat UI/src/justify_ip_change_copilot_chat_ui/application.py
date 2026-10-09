@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from .copilot_ui import CopilotAdapter
 from .errors import CopilotUIError, PostSendCancelledError, SubmissionUncertainError
+from .error_reporting import write_error_report
 from .logs import BatchLockSet, CaseLog
 from .models import PreflightReport, WorkspacePaths
 from .progress import ProgressDisplay
@@ -48,9 +49,11 @@ async def execute_queue(
                 except CopilotUIError as exc:
                     status = "failed"
                     detail = str(exc)
+                    write_error_report(workspace, exc, stage="case_processing", batch=item.batch.name, case_key=item.key, run_id=run_id)
                 except Exception as exc:
                     status = "failed"
                     detail = f"{type(exc).__name__}: {exc}"
+                    write_error_report(workspace, exc, stage="case_processing", batch=item.batch.name, case_key=item.key, run_id=run_id)
                 except PostSendCancelledError:
                     log.append(
                         item.case,

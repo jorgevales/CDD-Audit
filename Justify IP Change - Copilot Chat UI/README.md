@@ -24,7 +24,7 @@ Offline tests do not require `S:`, Edge, a Microsoft account, real documents, or
 
 `python_path.txt` beside `Setup.cmd` may contain one approved full `python.exe` path when automatic Python discovery is unsuitable. In an `S:` deployment, the complete base Python installation must resolve to `S:` or the same UNC share currently mapped as `S:`. The launcher uses isolated `-B -E -s` flags, verifies the bundled environment bootstrap by SHA-256, uses the VDI-confirmed direct pip seeder, installs only exact versions from `requirements.lock.txt`, and automatically removes failed or obsolete incomplete environments while holding the setup lock.
 
-Every invocation creates a diagnostic log before Python discovery under `.setup-logs\<Windows-account>`. If that shared location cannot be written, logging falls back to `%TEMP%\JustifyIPChange-SetupLogs`. The terminal always prints the exact log path.
+Before Python discovery, the launcher performs a safe project-owned cleanup of stale incomplete environments, generated `__pycache__` folders, and setup logs older than 14 days; it never touches operational batches, documents, user logs, locks, or Edge profiles. Runtime error reports are sanitized JSON files under `Working Space\Error logs`; they contain UTC timing, stage, error type, hashed user/device/workspace references, and redacted technical detail, never direct system paths or personal identifiers.
 
 ## Workspace contract
 
@@ -134,6 +134,7 @@ The suite covers deep paths with spaces, simulated drive resolution, required re
 ## Troubleshooting
 
 - **Setup did not finish:** copy the exact diagnostic log path printed at launcher startup. Logs exist before Python discovery begins.
+- **Support error reports:** inspect `Working Space\Error logs`. Correlate `occurred_at_utc`, `user_ref`, and `device_ref` to identify the VDI run without exposing account names or system paths.
 - **`SETUP LOCKED`:** another user is setting up the shared project, or the project is not writable. Wait for that setup to finish and retry.
 - **Python rejected on S:** use a complete Python 3.10+ installation on `S:`; a local interpreter is deliberately rejected for shared deployment.
 - **Invalid workspace:** select `Working Space\Copilot resources`, not the data root or source folder.

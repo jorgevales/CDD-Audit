@@ -14,6 +14,7 @@ from .case_discovery import match_batch_cases
 from .config import load_last_workspace, save_last_workspace
 from .copilot_ui import PlaywrightCopilotAdapter
 from .edge_session import EdgeSession
+from .error_reporting import write_error_report
 from .errors import ApplicationError, BatchLockedError, WorkspaceError
 from .identity import windows_account_name
 from .logs import CaseLog, LOG_FILENAME, REVIEW_REQUIRED, SUCCESS, new_run_id
@@ -25,6 +26,7 @@ from .workspace import validate_runtime_resources, validate_workspace
 
 
 PROJECT_NAME = "Justify IP Change - Copilot Chat UI"
+_LAST_WORKSPACE = None
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -137,7 +139,9 @@ def _print_preflight(workspace, user, log_path, report) -> None:
 
 
 def run_cli(args: argparse.Namespace) -> int:
+    global _LAST_WORKSPACE
     workspace = _select_workspace(args)
+    _LAST_WORKSPACE = workspace
     resources = validate_runtime_resources(workspace)
     records = load_case_workbook(resources["07_Interested_Parties_Changes_15576.csv"])
     base_message = load_text_resource(resources["base_message.md"])
@@ -188,8 +192,11 @@ def main(argv=None) -> int:
         return run_cli(parse_args(argv))
     except KeyboardInterrupt:
         print("\nInterrupted. The active outcome was preserved where possible; remaining cases stay resumable.", file=sys.stderr)
+        if _LAST_WORKSPACE:
+            write_error_report(_LAST_WORKSPACE, KeyboardInterrupt(), stage="operator_interrupt")
         return 130
     except BatchLockedError as exc:
+        report_path = write_error_report(_LAST_WORKSPACE, exc, stage="batch_lock")
         details = str(exc)
         try:
             payload = json.loads(details)
@@ -202,7 +209,12 @@ def main(argv=None) -> int:
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
         print(f"BATCH LOCKED: {details}", file=sys.stderr)
+        if report_path:
+            print("Support error report saved under the workspace Error logs folder.", file=sys.stderr)
         return 3
     except (ApplicationError, OSError, ValueError) as exc:
+        report_path = write_error_report(_LAST_WORKSPACE, exc, stage="cli_failure")
         print(f"ERROR: {exc}", file=sys.stderr)
+        if report_path:
+            print("Support error report saved under the workspace Error logs folder.", file=sys.stderr)
         return 1

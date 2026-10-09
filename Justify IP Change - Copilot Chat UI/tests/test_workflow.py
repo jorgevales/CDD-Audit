@@ -4,6 +4,7 @@ import asyncio
 import csv
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import sys
@@ -24,6 +25,7 @@ from justify_ip_change_copilot_chat_ui.case_discovery import discover_case_folde
 from justify_ip_change_copilot_chat_ui.copilot_ui import CaseOutcome, SimulationAdapter
 from justify_ip_change_copilot_chat_ui.cli import _eligible_batches, _select_workspace, parse_args, run_cli
 from justify_ip_change_copilot_chat_ui.errors import BatchLockedError, ResourceError, WorkspaceError
+from justify_ip_change_copilot_chat_ui.error_reporting import sanitize_message, write_error_report
 from justify_ip_change_copilot_chat_ui.errors import PostSendCancelledError
 from justify_ip_change_copilot_chat_ui.identity import windows_account_name
 from justify_ip_change_copilot_chat_ui.logs import BatchLockSet, CaseLog, LOG_FILENAME
@@ -133,6 +135,22 @@ class WorkspaceTests(unittest.TestCase):
     def test_windows_account_name_is_sanitised(self):
         with patch("getpass.getuser", return_value=r"DOMAIN\synthetic.user"):
             self.assertEqual(windows_account_name(), "synthetic.user")
+
+    def test_error_report_is_workspace_local_and_redacted(self):
+        workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
+        raw = r"failure at C:\Users\Jane Doe\Documents\secret.txt and /tmp/private.txt"
+        self.assertNotIn("C:\\Users", sanitize_message(raw))
+        with patch.dict(os.environ, {"USERNAME": "Jane Doe", "COMPUTERNAME": "VDI-01"}, clear=False):
+            path = write_error_report(workspace, RuntimeError(raw), stage="edge_startup", batch=self.fixture.batches[0].name)
+        self.assertIsNotNone(path)
+        self.assertEqual(path.parent.name, "Error logs")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        self.assertEqual(payload["schema"], "cdd-audit-error-report-v1")
+        self.assertEqual(payload["stage"], "edge_startup")
+        self.assertNotIn("C:\\Users", text)
+        self.assertNotIn("Jane Doe", text)
+        self.assertNotIn("VDI-01", text)
 
 
 class BatchTests(unittest.TestCase):
