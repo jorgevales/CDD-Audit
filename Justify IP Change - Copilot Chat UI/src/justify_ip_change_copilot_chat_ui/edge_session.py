@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import time
 import urllib.request
@@ -94,16 +95,53 @@ class EdgeSession:
         self.endpoint = cdp_endpoint(port)
         self.process: subprocess.Popen | None = None
 
-    def ensure_started(self, timeout: float = 90.0) -> None:
-        payload = get_cdp_version(self.endpoint)
-        if payload:
-            validate_existing_profile(self.port, self.profile)
+    @staticmethod
+    def _free_port(preferred: int, excluded: set[int]) -> int:
+        candidates = [preferred, preferred + 1, preferred + 2]
+        for candidate in candidates:
+            if not 1024 <= candidate <= 65535 or candidate in excluded:
+                continue
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    probe.bind(("127.0.0.1", candidate))
+                except OSError:
+                    continue
+            return candidate
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            candidate = int(probe.getsockname()[1])
+        if candidate in excluded:
+            raise CopilotUIError("Could not find an unused loopback debugging port for Edge.")
+        return candidate
+
+    def _stop_failed_process(self) -> None:
+        process = self.process
+        self.process = None
+        if process is None or process.poll() is not None:
             return
+        # This process was created by this EdgeSession, so it is safe to stop
+        # during recovery. Existing operator-owned Edge processes are never touched.
+        try:
+            process.terminate()
+            process.wait(timeout=3)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                process.kill()
+                process.wait(timeout=3)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+    def _launch_attempt(self, profile: Path, port: int, timeout: float) -> bool:
+        self.profile = profile.expanduser().resolve()
+        self.port = port
+        self.endpoint = cdp_endpoint(port)
         self.profile.mkdir(parents=True, exist_ok=True)
         command = [
             str(find_edge(self.edge_path)),
-            f"--remote-debugging-port={self.port}",
+            f"--remote-debugging-port={port}",
             "--remote-debugging-address=127.0.0.1",
+            "--remote-allow-origins=*",
             f"--user-data-dir={self.profile}",
             "--no-first-run",
             "--no-default-browser-check",
@@ -112,13 +150,50 @@ class EdgeSession:
         self.process = subprocess.Popen(command)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            payload = get_cdp_version(self.endpoint, timeout=0.25)
+            try:
+                payload = get_cdp_version(self.endpoint, timeout=0.25)
+            except CopilotUIError:
+                payload = None
             if payload:
-                return
+                return True
             if self.process.poll() is not None:
                 break
             time.sleep(0.15)
-        raise CopilotUIError("Edge did not expose its local debugging endpoint before the startup timeout.")
+        self._stop_failed_process()
+        return False
+
+    def ensure_started(self, timeout: float = 90.0) -> None:
+        started_at = time.monotonic()
+        attempted_ports: set[int] = set()
+        try:
+            payload = get_cdp_version(self.endpoint)
+            if payload:
+                validate_existing_profile(self.port, self.profile)
+                print("\033[92mEdge startup method: existing validated endpoint\033[0m")
+                return
+        except CopilotUIError:
+            pass
+
+        edge_timeout = max(5.0, timeout / 3.0)
+        requested_profile = self.profile
+        methods = (
+            ("dedicated profile and requested port", requested_profile, self.port),
+            ("dedicated profile and alternate port", requested_profile, None),
+            ("fresh run profile and alternate port", requested_profile.parent / (requested_profile.name + "-run-" + os.urandom(4).hex()), None),
+        )
+        for method, profile, requested_port in methods:
+            if time.monotonic() - started_at >= timeout:
+                break
+            port = requested_port if requested_port is not None else self._free_port(self.port, attempted_ports)
+            attempted_ports.add(port)
+            remaining = max(5.0, min(edge_timeout, timeout - (time.monotonic() - started_at)))
+            if self._launch_attempt(profile, port, remaining):
+                print(f"\033[92mEdge startup method: {method}\033[0m")
+                return
+        raise CopilotUIError(
+            "Edge did not expose its local debugging endpoint after three bounded startup methods "
+            "(existing endpoint, alternate port, and fresh profile)."
+        )
 
     def close_owned(self) -> None:
         # Keep the visible, signed-in Edge session available for operator inspection.

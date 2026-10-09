@@ -14,7 +14,7 @@ The supplied `sanitized_step_08.zip` was reviewed as a read-only reference and r
 | Successful-case resume filter | `logs.py`, `queue_builder.py` | Only latest success completes a case; every other latest status remains eligible for the next run. |
 | 100-ID batch boundary | `batch_discovery.py` | Used only for discovery/order; execution is a single cross-batch queue. |
 | Terminal progress | `progress.py` | Remaining count covers the entire selected queue and changes only after durable logging. |
-| Edge/CDP and UI selectors | `edge_session.py`, `copilot_ui.py` | Isolated, visible, bounded, profile-validated, interactive-login capable. |
+| Edge/CDP and UI selectors | `edge_session.py`, `copilot_ui.py` | Isolated, visible, profile-validated, interactive-login capable; bounded startup retries cover the existing endpoint, alternate port, and fresh run profile with green method telemetry. |
 | Inline self-tests | `tests/test_workflow.py` | Replaced by synthetic unit and integration-style tests. |
 | Setup diagnostics | `.setup-logs/<Windows-account>` with `%TEMP%` fallback | Logging begins before interpreter discovery and captures native setup output. The ignored shared folder makes failures supportable without tracking logs. |
 

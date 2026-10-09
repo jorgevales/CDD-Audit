@@ -62,6 +62,7 @@ def _eligible_batches(batches: list[BatchInfo], records, latest):
     eligible = []
     completed = []
     no_runnable = []
+    discovery_blocked = []
     for batch in batches:
         if batch.completed_by:
             completed.append(batch)
@@ -72,7 +73,7 @@ def _eligible_batches(batches: list[BatchInfo], records, latest):
         review = sum(1 for row in rows if latest.get(row.canonical_key) and latest[row.canonical_key].status in REVIEW_REQUIRED)
         remaining = len(rows) - successful
         if discovery_errors:
-            print(f"WARNING {batch.name}: {len(discovery_errors)} case folder(s) are blocked by discovery errors.")
+            discovery_blocked.append(batch)
         if rows and successful == len(rows):
             print(
                 f"REQUIRES REVIEW {batch.name}: all {len(rows)} cases are successful in the user log, "
@@ -87,6 +88,8 @@ def _eligible_batches(batches: list[BatchInfo], records, latest):
         print(describe_batch_ranges(completed, verb="are excluded because a completed Excel output exists"))
     if no_runnable:
         print(describe_batch_ranges(no_runnable, verb="are excluded because no automatically runnable cases remain"))
+    if discovery_blocked:
+        print(describe_batch_ranges(discovery_blocked, verb="have cases blocked by discovery errors"))
     return eligible
 
 
@@ -118,17 +121,11 @@ def _select_batches(args: argparse.Namespace, eligible) -> list[BatchInfo]:
 
 def _print_preflight(workspace, user, log_path, report) -> None:
     print("\nPREFLIGHT SUMMARY")
-    print(f"Selected workspace: {workspace.selected}")
-    print(f"Copilot resources: {workspace.copilot_resources}")
-    print(f"Users folder: {workspace.users}")
-    print(f"Windows account: {user}")
-    print(f"User log: {log_path}")
     print("Selected batches: " + ", ".join(batch.name for batch in report.selected_batches))
     print(f"Total discovered cases: {report.total_discovered}")
     print(f"Already successful: {report.successful}")
     print(f"Remaining eligible cases: {report.remaining}")
     print(f"Cases blocked by validation: {len(report.blocked)}")
-    print(f"Expected attachment operations: {report.attachment_count}")
     for summary in report.summaries:
         for warning in summary.warnings:
             print(f"WARNING {summary.batch.name}: {warning}")

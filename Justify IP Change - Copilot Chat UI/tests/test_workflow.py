@@ -22,12 +22,12 @@ from justify_ip_change_copilot_chat_ui.attachments import build_attachment_plan,
 from justify_ip_change_copilot_chat_ui.batch_discovery import batch_range_groups, completed_output_file, describe_batch_ranges, discover_batches
 from justify_ip_change_copilot_chat_ui.case_discovery import discover_case_folders, match_batch_cases
 from justify_ip_change_copilot_chat_ui.copilot_ui import CaseOutcome, SimulationAdapter
-from justify_ip_change_copilot_chat_ui.cli import _select_workspace, parse_args, run_cli
+from justify_ip_change_copilot_chat_ui.cli import _eligible_batches, _select_workspace, parse_args, run_cli
 from justify_ip_change_copilot_chat_ui.errors import BatchLockedError, ResourceError, WorkspaceError
 from justify_ip_change_copilot_chat_ui.errors import PostSendCancelledError
 from justify_ip_change_copilot_chat_ui.identity import windows_account_name
 from justify_ip_change_copilot_chat_ui.logs import BatchLockSet, CaseLog, LOG_FILENAME
-from justify_ip_change_copilot_chat_ui.models import CaseRecord
+from justify_ip_change_copilot_chat_ui.models import BatchInfo, CaseRecord
 from justify_ip_change_copilot_chat_ui.paths import LocalSimulationResolver, normalise_windows_path_text, strip_extended_prefix
 from justify_ip_change_copilot_chat_ui.queue_builder import build_preflight
 from justify_ip_change_copilot_chat_ui.resources import REQUIRED_CASE_COLUMNS, load_case_workbook
@@ -161,6 +161,12 @@ class BatchTests(unittest.TestCase):
     def test_batch_range_reporting_omits_excel_filename(self):
         message = describe_batch_ranges(["Batch_00001_to_00100"], verb="are excluded because a completed Excel output exists")
         self.assertEqual(message, "Batches 1 to 100 are excluded because a completed Excel output exists.")
+
+    def test_discovery_errors_are_reported_as_ranges(self):
+        batches = [BatchInfo(Path(f"Batch_{start:05d}_to_{start + 99:05d}"), start, start + 99) for start in (1, 101, 201)]
+        with patch("justify_ip_change_copilot_chat_ui.cli.match_batch_cases", return_value=([], ["synthetic discovery error"])), contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(_eligible_batches(batches, [], {}), [])
+        self.assertIn("Batches 1 to 300 have cases blocked by discovery errors.", output.getvalue())
 
     def test_direct_ips_excel_completes_batch_case_insensitive(self):
         marker = self.fixture.batches[0] / "iPs_Completed_Analysis.XLSX"
@@ -433,6 +439,15 @@ class CLIDryRunTest(unittest.TestCase):
             text = output.getvalue()
             self.assertIn("Remaining eligible cases: 5", text)
             self.assertIn("Dry run complete", text)
+            for hidden_line in (
+                "Selected workspace:",
+                "Copilot resources:",
+                "Users folder:",
+                "Windows account:",
+                "User log:",
+                "Expected attachment operations:",
+            ):
+                self.assertNotIn(hidden_line, text)
             self.assertFalse((fixture.users / "synthetic.user" / LOG_FILENAME).exists())
             self.assertFalse((fixture.working / ".justify-ip-change-locks").exists())
 

@@ -142,6 +142,7 @@ The suite covers deep paths with spaces, simulated drive resolution, required re
 - **Batch locked:** read the reported holder details. Do not delete a live user's lock.
 - **Ambiguous attachment:** correct duplicate/gapped `_part_<n>.pdf` files; the application will not guess.
 - **Copilot login:** complete login/MFA in visible Edge and restart if readiness times out.
+- **Edge debugging endpoint timeout:** startup tries the existing validated endpoint, the requested port, an alternate loopback port, and a fresh dedicated profile within bounded time slices. A successful method is printed as a short green terminal line for VDI confirmation.
 - **Selector failure:** retain the terminal error and per-user bootstrap diagnostic path; do not repeatedly submit the case manually without checking its log state.
 - **Log lock:** close another run using the same Windows account. The batch lock prevents cross-user work, while the user-log lock prevents same-account corruption.
 - **Edge port/profile mismatch:** close the other dedicated app Edge session or select another approved port. The application never attaches to an unverified profile.
