@@ -35,7 +35,7 @@ Batch locks prevent cooperating instances from working on the same selected batc
 
 ## Browser safety boundary
 
-The app uses a visible, dedicated machine-scoped Edge profile and a loopback CDP endpoint. Startup checks profile/port ownership, launches Edge detached with a new window, then validates an existing endpoint or tries the requested port, an alternate port, and a fresh dedicated run profile in bounded time slices; the successful method is reported in a short green terminal line. An existing listener must resolve to the configured profile. Send confirmation requires two independent UI observations. An ambiguous committed operation is logged as review-required and remains eligible for the next run, so no non-successful case is silently lost. Playwright disconnects without closing the retained Edge process so the operator can inspect uncertain UI state.
+The app uses a visible, dedicated machine-scoped Edge profile in personal OneDrive storage and a loopback CDP endpoint. Startup checks profile/port ownership, launches Edge detached to `about:blank`, then validates an existing endpoint or tries the requested port, an alternate port, and a fresh dedicated run profile in bounded time slices. Playwright connects with bounded retries before Copilot navigation; the listener's profile ownership is rechecked before use. The successful method is reported in a short green terminal line. Send confirmation requires two independent UI observations. An ambiguous committed operation is logged as review-required and remains eligible for the next run, so no non-successful case is silently lost. Playwright disconnects without closing the retained Edge process so the operator can inspect uncertain UI state.
 
 ## Privacy boundary
 

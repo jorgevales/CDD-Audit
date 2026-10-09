@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import json
-import os
 from pathlib import Path
 import sys
 
@@ -20,6 +18,7 @@ from .identity import windows_account_name
 from .logs import CaseLog, LOG_FILENAME, REVIEW_REQUIRED, SUCCESS, new_run_id
 from .models import BatchInfo
 from .paths import LocalSimulationResolver, WindowsSDriveResolver
+from .profile_storage import default_edge_profile
 from .queue_builder import build_preflight
 from .resources import load_case_workbook, load_text_resource
 from .workspace import validate_runtime_resources, validate_workspace
@@ -184,9 +183,7 @@ def run_cli(args: argparse.Namespace) -> int:
     if answer not in {"y", "yes"}:
         print("Run cancelled before Edge startup; no batch lock was retained.")
         return 0
-    local_base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
-    machine_key = hashlib.sha256(os.environ.get("COMPUTERNAME", "local-machine").casefold().encode("utf-8")).hexdigest()[:16]
-    profile = args.profile_dir or local_base / "CDD Audit" / "JustifyIPChangeCopilotChatUI" / "runtime" / "edge-profiles" / ("vdi-" + machine_key)
+    profile = args.profile_dir or default_edge_profile()
     user_folder.mkdir(parents=True, exist_ok=True)
     adapter = PlaywrightCopilotAdapter(EdgeSession(profile, args.port, args.edge_path), model=args.model)
     result = asyncio.run(execute_queue(report, workspace, log, adapter, user=user, run_id=new_run_id()))

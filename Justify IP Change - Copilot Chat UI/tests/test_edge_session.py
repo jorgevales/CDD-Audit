@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -16,9 +17,17 @@ if str(SRC) not in sys.path:
 
 from justify_ip_change_copilot_chat_ui.edge_session import EdgeSession, _profile_argument, get_cdp_version
 from justify_ip_change_copilot_chat_ui.errors import CopilotUIError
+from justify_ip_change_copilot_chat_ui.profile_storage import default_edge_profile
 
 
 class EdgeSessionTests(unittest.TestCase):
+    def test_default_profile_uses_personal_onedrive_storage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"OneDriveCommercial": directory}):
+                profile = default_edge_profile()
+            self.assertTrue(profile.is_relative_to(Path(directory).resolve()))
+            self.assertEqual(profile.parent.name, "edge-profiles")
+
     def test_windows_quoted_profile_argument_with_spaces(self):
         profile = Path(r"C:\Users\Example Person\AppData\Local\CDD Audit\EdgeProfile")
         self.assertEqual(_profile_argument(f'msedge.exe "--user-data-dir={profile}"'), profile)
@@ -70,6 +79,7 @@ class EdgeSessionTests(unittest.TestCase):
                 self.assertFalse(session._launch_attempt(session.profile, session.port, timeout=0))
             command = popen.call_args.args[0]
             self.assertIn("--new-window", command)
+            self.assertEqual(command[-1], "about:blank")
             self.assertIn("--remote-debugging-address=127.0.0.1", command)
             self.assertNotIn("--remote-allow-origins=*", command)
 

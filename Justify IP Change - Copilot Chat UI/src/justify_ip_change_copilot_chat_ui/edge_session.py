@@ -204,6 +204,14 @@ class EdgeSession:
             self._stop_failed_process()
             return False
         self.profile.mkdir(parents=True, exist_ok=True)
+        probe = self.profile / (".write-check-" + os.urandom(4).hex())
+        try:
+            with probe.open("xb") as handle:
+                handle.write(b"ok")
+        except OSError as exc:
+            raise CopilotUIError("The dedicated Edge profile is not writable. Choose a writable personal OneDrive folder with --profile-dir.") from exc
+        finally:
+            probe.unlink(missing_ok=True)
         command = [
             str(find_edge(self.edge_path)),
             f"--remote-debugging-port={port}",
@@ -212,7 +220,7 @@ class EdgeSession:
             "--no-first-run",
             "--no-default-browser-check",
             "--new-window",
-            "https://m365.cloud.microsoft/chat",
+            "about:blank",
         ]
         options = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "close_fds": True}
         if os.name == "nt":

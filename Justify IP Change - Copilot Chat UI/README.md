@@ -101,7 +101,7 @@ Terminals without colour receive the same plain-text label.
 
 ## Authentication and safe UI behaviour
 
-Edge always runs visibly with a dedicated per-user, machine-scoped profile beneath `%LOCALAPPDATA%\CDD Audit\JustifyIPChangeCopilotChatUI\runtime\edge-profiles`. The launcher checks profile and loopback-port ownership before launch and starts Edge detached so its profile remains writable. The operator completes login and MFA directly in Edge. Startup waits for both the Copilot editor and model picker. Selectors are isolated in `copilot_ui.py`.
+Edge always runs visibly with a dedicated per-user, machine-scoped profile under the user's available OneDrive folder, following the working Copilot Local Agent layout. The launcher checks profile and loopback-port ownership, opens `about:blank`, connects Playwright, verifies the profile owner, and only then navigates to Copilot. `--profile-dir` can select a different writable personal profile location. The operator completes login and MFA directly in Edge. Startup waits for both the Copilot editor and model picker. Selectors are isolated in `copilot_ui.py`.
 
 Each case uses a fresh chat. The program validates the exact composer text and attached filenames before Send. After clicking Send, it requires both a cleared composer and a matching user turn. If these cannot both be proved, the case becomes `requires_review`; it is never resent automatically. A successful/failed result is accepted only after the exact final response contract is stable across repeated observations.
 

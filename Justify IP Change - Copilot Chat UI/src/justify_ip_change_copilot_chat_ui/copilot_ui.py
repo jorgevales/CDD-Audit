@@ -6,7 +6,7 @@ import re
 import time
 from typing import Protocol
 
-from .edge_session import EdgeSession
+from .edge_session import EdgeSession, get_cdp_version, validate_existing_profile
 from .errors import CopilotUIError, PostSendCancelledError, SubmissionUncertainError
 from .models import QueueItem
 
@@ -99,7 +99,29 @@ class PlaywrightCopilotAdapter:
 
         self.manager = async_playwright()
         self.playwright = await self.manager.start()
-        self.browser = await self.playwright.chromium.connect_over_cdp(self.edge.endpoint, timeout=int(self.startup_timeout * 1000))
+        deadline = time.monotonic() + min(self.startup_timeout, 45)
+        attempts = 0
+        while time.monotonic() < deadline:
+            payload = await asyncio.to_thread(get_cdp_version, self.edge.endpoint)
+            if payload:
+                route = payload["webSocketDebuggerUrl"] if attempts % 2 == 0 else self.edge.endpoint
+                budget = min((5, 10, 20)[min(attempts, 2)], deadline - time.monotonic())
+                if budget > 0:
+                    attempts += 1
+                    try:
+                        browser = await asyncio.wait_for(
+                            self.playwright.chromium.connect_over_cdp(route, timeout=max(1000, int(budget * 1000))),
+                            timeout=budget + 0.25,
+                        )
+                        if browser.is_connected() and browser.contexts:
+                            self.browser = browser
+                            break
+                    except Exception:
+                        pass
+            await asyncio.sleep(min(0.25, max(0, deadline - time.monotonic())))
+        if self.browser is None:
+            raise CopilotUIError("Edge opened its local endpoint, but Playwright could not connect within the startup limit.")
+        await asyncio.to_thread(validate_existing_profile, self.edge.port, self.edge.profile)
         self.context = self.browser.contexts[0]
         self.page = await self.context.new_page()
         await self.page.goto(COPILOT_URL, wait_until="domcontentloaded", timeout=int(self.startup_timeout * 1000))
