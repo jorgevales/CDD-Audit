@@ -34,6 +34,23 @@ class EdgeSessionTests(unittest.TestCase):
             self.assertIn("--remote-debugging-address=127.0.0.1", command)
             self.assertNotIn("--remote-allow-origins=*", command)
 
+    def test_edge_handoff_keeps_polling_after_launcher_process_exits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
+            process = type("Process", (), {
+                "poll": lambda self: 0,
+                "terminate": lambda self: None,
+                "wait": lambda self, timeout=None: 0,
+            })()
+            payload = {"Browser": "Edg/fixture", "webSocketDebuggerUrl": "ws://127.0.0.1:9445/devtools/browser/x"}
+            with patch("justify_ip_change_copilot_chat_ui.edge_session.find_edge", return_value=Path("msedge.exe")), patch(
+                "justify_ip_change_copilot_chat_ui.edge_session.subprocess.Popen", return_value=process
+            ), patch.object(session, "_port_in_use", return_value=False), patch(
+                "justify_ip_change_copilot_chat_ui.edge_session.get_cdp_version", side_effect=[None, payload]
+            ) as probe, patch("justify_ip_change_copilot_chat_ui.edge_session.time.sleep"):
+                self.assertTrue(session._launch_attempt(session.profile, session.port, timeout=1))
+            self.assertEqual(probe.call_count, 2)
+
     def test_failed_requested_port_retries_alternate_port_and_reports_method(self):
         with tempfile.TemporaryDirectory() as directory:
             session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)

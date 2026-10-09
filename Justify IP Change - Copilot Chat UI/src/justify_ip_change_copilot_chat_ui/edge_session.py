@@ -195,6 +195,7 @@ class EdgeSession:
         except OSError as exc:
             raise CopilotUIError("Microsoft Edge could not be started. Check the Edge installation and local execution policy.") from exc
         deadline = time.monotonic() + timeout
+        launched_process_exited = False
         while time.monotonic() < deadline:
             try:
                 payload = get_cdp_version(self.endpoint, timeout=0.25)
@@ -203,8 +204,10 @@ class EdgeSession:
             if payload:
                 return True
             if self.process.poll() is not None:
-                break
-            time.sleep(0.15)
+                # Edge commonly hands the visible window to a child process;
+                # keep the full bounded handshake window for that child.
+                launched_process_exited = True
+            time.sleep(0.10 if not launched_process_exited else 0.15)
         self._stop_failed_process()
         return False
 
