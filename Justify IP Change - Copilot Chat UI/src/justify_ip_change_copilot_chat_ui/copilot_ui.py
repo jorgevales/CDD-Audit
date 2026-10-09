@@ -40,9 +40,11 @@ SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS = 900_000
 TRANSFER_QUIET_SECONDS = 0.55
 ATTACH_BUTTON_SELECTORS = (
     "#plus-menu-container button[data-testid='PlusMenuButton']",
+    "#plus-menu-container button",
     "button[data-testid='chat-input-attach-button']",
     "button[data-test-id='chat-input-attach-button']",
     "button[aria-label='Add and manage sources']",
+    "button[aria-label='Add']",
 )
 MODEL_PICKER_SELECTORS = (
     "#gptModeSwitcher",
@@ -421,16 +423,7 @@ class PlaywrightCopilotAdapter:
         return await editor.input_value() if tag in {"textarea", "input"} else await editor.inner_text()
 
     async def _attach(self, item: QueueItem) -> None:
-        inputs = self.page.locator(",".join(ATTACH_SELECTORS))
-        if not await inputs.count():
-            # Reveal the file input through the visible attachment control.
-            button = self.page.locator(",".join(ATTACH_BUTTON_SELECTORS)).first
-            if not await button.is_visible():
-                raise CopilotUIError("The Copilot attachment control is unavailable.")
-            await button.click()
-            inputs = self.page.locator(",".join(ATTACH_SELECTORS))
-        if not await inputs.count():
-            raise CopilotUIError("The Copilot file input did not become available.")
+        inputs = await self._ensure_attachment_input()
         await inputs.first.set_input_files(
             [str(path) for path in item.attachments.paths], timeout=SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS
         )
@@ -472,6 +465,41 @@ class PlaywrightCopilotAdapter:
                 last_notice = time.monotonic()
             await asyncio.sleep(0.25)
         raise CopilotUIError("Documents did not reach a stable, fully transferred state before the single-case timeout. Send was not clicked.")
+
+    async def _ensure_attachment_input(self):
+        """Wait for the React picker; opening Add may only expose an Upload menu."""
+        inputs = self.page.locator(",".join(ATTACH_SELECTORS))
+        deadline = time.monotonic() + 10
+        attempt = 0
+        while True:
+            if await inputs.count():
+                return inputs
+            if time.monotonic() >= deadline:
+                break
+            attempt += 1
+            try:
+                button = await self._first_visible(ATTACH_BUTTON_SELECTORS)
+                if button is not None:
+                    await button.click(timeout=700, no_wait_after=True)
+                if await inputs.count():
+                    return inputs
+                upload = self.page.get_by_role(
+                    "menuitem", name=re.compile(r"upload|device|computer|browse", re.I)
+                )
+                if await upload.count() and await upload.first.is_visible():
+                    await upload.first.click(timeout=700, no_wait_after=True)
+                if await inputs.count():
+                    return inputs
+                if attempt % 3 == 0:
+                    await self.page.evaluate(r"""() => {
+                        const button = document.querySelector(
+                            'button[data-testid="chat-input-attach-button"],button[data-test-id="chat-input-attach-button"],#plus-menu-container button,button[aria-label="Add"]');
+                        if (button && !button.disabled) button.click();
+                    }""")
+            except Exception:
+                pass
+            await asyncio.sleep(0.1)
+        raise CopilotUIError("The Copilot file input did not become available after bounded picker recovery. No case was sent.")
 
     async def _attachment_state(self, expected_names: list[str]) -> dict[str, object]:
         return await self.page.evaluate(r"""names => {

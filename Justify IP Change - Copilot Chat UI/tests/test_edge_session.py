@@ -32,6 +32,18 @@ class EdgeSessionTests(unittest.TestCase):
         self.assertEqual(SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS, 900_000)
         self.assertEqual(SINGLE_CASE_UPLOAD_TIMEOUT_SECONDS, 600)
 
+    def test_attachment_picker_waits_for_delayed_file_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
+            inputs = SimpleNamespace(count=AsyncMock(side_effect=[0, 0, 1]))
+            button = SimpleNamespace(click=AsyncMock())
+            menu = SimpleNamespace(count=AsyncMock(return_value=0))
+            adapter.page = SimpleNamespace(locator=Mock(return_value=inputs), get_by_role=Mock(return_value=menu))
+            with patch.object(adapter, "_first_visible", new=AsyncMock(return_value=button)):
+                found = asyncio.run(adapter._ensure_attachment_input())
+            self.assertIs(found, inputs)
+            button.click.assert_awaited_once()
+
     def test_attachment_chips_alone_do_not_finish_transfer(self):
         with tempfile.TemporaryDirectory() as directory:
             adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
