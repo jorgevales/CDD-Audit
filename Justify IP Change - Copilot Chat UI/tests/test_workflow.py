@@ -183,6 +183,23 @@ class WorkspaceTests(unittest.TestCase):
         self.assertNotIn("raw", payload["diagnostics"]["copilot"])
         self.assertNotIn("Jane Doe", path.read_text(encoding="utf-8"))
 
+    def test_prompt_mismatch_report_keeps_shape_not_content(self):
+        workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
+        error = RuntimeError("private prompt text must not be recorded")
+        error.diagnostics = {"case": {
+            "phase": "composer_fill", "prompt_verification": "mismatch",
+            "prompt_expected_chars": 2450, "prompt_observed_chars": 2455,
+            "prompt_text": "private prompt text must not be recorded",
+        }}
+        path = write_error_report(workspace, error, stage="case_processing")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        case = payload["diagnostics"]["case"]
+        self.assertEqual(case["prompt_verification"], "mismatch")
+        self.assertEqual(case["prompt_expected_chars"], 2450)
+        self.assertEqual(case["prompt_observed_chars"], 2455)
+        self.assertNotIn("prompt_text", case)
+        self.assertNotIn("private prompt text", path.read_text(encoding="utf-8"))
+
     def test_error_report_retains_bounded_readiness_evidence_without_page_content(self):
         workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
         private = r"C:\Users\Jane Doe\private\case 12345.txt"

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import re
 import time
 from typing import Protocol
+import unicodedata
 from urllib.parse import urlparse
 
 from .edge_session import EdgeSession, get_cdp_version, validate_existing_profile
@@ -422,6 +423,13 @@ class PlaywrightCopilotAdapter:
         tag = str(await editor.evaluate("node => node.tagName || ''")).casefold()
         return await editor.input_value() if tag in {"textarea", "input"} else await editor.inner_text()
 
+    @staticmethod
+    def _comparable_prompt_text(value: str) -> str:
+        """Ignore rich-editor blank-line expansion without ignoring missing text."""
+        value = unicodedata.normalize("NFC", value).replace("\r\n", "\n").replace("\r", "\n")
+        value = value.replace("\u00a0", " ")
+        return re.sub(r"\n{2,}", "\n\n", value.strip())
+
     async def _attach(self, item: QueueItem) -> None:
         paths = item.attachments.paths
         file_input = await self._ensure_attachment_input(paths)
@@ -678,8 +686,25 @@ class PlaywrightCopilotAdapter:
         if editor is None:
             raise CopilotUIError("The Copilot composer disappeared before the prompt could be entered.")
         await editor.fill(item.prompt)
-        actual = (await self._editor_text(editor)).replace("\r\n", "\n").strip()
-        if actual != item.prompt.strip():
+        actual = await self._editor_text(editor)
+        expected_exact = item.prompt.replace("\r\n", "\n").strip()
+        if self._comparable_prompt_text(actual) != self._comparable_prompt_text(item.prompt):
+            # Rich editors may update their DOM after fill returns. Give that
+            # render one brief chance to settle, but never Send a text mismatch.
+            await asyncio.sleep(0.2)
+            actual = await self._editor_text(editor)
+        actual_exact = actual.replace("\r\n", "\n").strip()
+        comparison = (
+            "exact" if actual_exact == expected_exact else
+            "rendered_blank_lines" if self._comparable_prompt_text(actual) == self._comparable_prompt_text(item.prompt)
+            else "mismatch"
+        )
+        self.case_diagnostics.update(
+            prompt_verification=comparison,
+            prompt_expected_chars=len(item.prompt),
+            prompt_observed_chars=len(actual),
+        )
+        if comparison == "mismatch":
             raise CopilotUIError("The Copilot composer did not preserve the complete prompt; Send was not clicked.")
         self.case_diagnostics["phase"] = "attachment_upload"
         await self._attach(item)

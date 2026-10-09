@@ -52,6 +52,14 @@ class EdgeSessionTests(unittest.TestCase):
         self.assertTrue(PlaywrightCopilotAdapter._accepts_documents(".pdf,.md", paths))
         self.assertTrue(PlaywrightCopilotAdapter._accepts_documents(None, paths))
 
+    def test_rich_editor_blank_line_expansion_preserves_complete_prompt(self):
+        normalize = PlaywrightCopilotAdapter._comparable_prompt_text
+        expected = "Case 7\n\nInstructions\nReview every document.\n\nFinal result"
+        rendered = "Case 7\n\n\nInstructions\nReview every document.\n\n\nFinal result"
+        self.assertEqual(normalize(expected), normalize(rendered))
+        self.assertNotEqual(normalize(expected), normalize(rendered.replace("every ", "")))
+        self.assertNotEqual(normalize(expected), normalize(rendered.replace("Review every document.\n", "")))
+
     def test_attachment_chips_alone_do_not_finish_transfer(self):
         with tempfile.TemporaryDirectory() as directory:
             adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))

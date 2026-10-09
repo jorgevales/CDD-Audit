@@ -32,6 +32,7 @@ _DIAGNOSTIC_COUNTS = {
     "cdp_connect_attempts", "cdp_context_count", "attachment_count", "elapsed_ms",
     "readiness_elapsed_ms", "readiness_checks", "frame_count", *_EDITOR_COUNT_KEYS,
     "attachment_chips", "attachment_matched", "upload_retry_count",
+    "prompt_expected_chars", "prompt_observed_chars", "attachment_picker_attempts",
 }
 _DIAGNOSTIC_PORTS = {"requested_port", "selected_port", "port"}
 _ERROR_TYPES = {
@@ -68,6 +69,8 @@ _DIAGNOSTIC_ENUMS = {
     "page_category": {"copilot", "login", "other"},
     "document_state": {"loading", "interactive", "complete", "unknown"},
     "navigation_outcome": {"success", "auth", "forbidden", "timeout", "error", "no_response"},
+    "prompt_verification": {"exact", "rendered_blank_lines", "mismatch"},
+    "attachment_picker_error_type": _ERROR_TYPES,
 }
 _DIAGNOSTIC_KEYS = (
     _DIAGNOSTIC_LISTS | _DIAGNOSTIC_OBJECTS | _DIAGNOSTIC_FLAGS | _DIAGNOSTIC_COUNTS
