@@ -17,6 +17,23 @@ from justify_ip_change_copilot_chat_ui.edge_session import EdgeSession
 
 
 class EdgeSessionTests(unittest.TestCase):
+    def test_launch_uses_detached_machine_safe_edge_options(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
+            process = type("Process", (), {
+                "poll": lambda self: None,
+                "terminate": lambda self: None,
+                "wait": lambda self, timeout=None: 0,
+            })()
+            with patch("justify_ip_change_copilot_chat_ui.edge_session.find_edge", return_value=Path("msedge.exe")), patch(
+                "justify_ip_change_copilot_chat_ui.edge_session.subprocess.Popen", return_value=process
+            ) as popen, patch.object(session, "_port_in_use", return_value=False):
+                self.assertFalse(session._launch_attempt(session.profile, session.port, timeout=0))
+            command = popen.call_args.args[0]
+            self.assertIn("--new-window", command)
+            self.assertIn("--remote-debugging-address=127.0.0.1", command)
+            self.assertNotIn("--remote-allow-origins=*", command)
+
     def test_failed_requested_port_retries_alternate_port_and_reports_method(self):
         with tempfile.TemporaryDirectory() as directory:
             session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)

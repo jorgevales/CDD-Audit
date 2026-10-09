@@ -101,7 +101,7 @@ Terminals without colour receive the same plain-text label.
 
 ## Authentication and safe UI behaviour
 
-Edge always runs visibly with a dedicated per-user profile beneath `%LOCALAPPDATA%`. The operator completes login and MFA directly in Edge. Startup waits for both the Copilot editor and model picker. Selectors are isolated in `copilot_ui.py`.
+Edge always runs visibly with a dedicated per-user, machine-scoped profile beneath `%LOCALAPPDATA%\CDD Audit\JustifyIPChangeCopilotChatUI\runtime\edge-profiles`. The launcher checks profile and loopback-port ownership before launch and starts Edge detached so its profile remains writable. The operator completes login and MFA directly in Edge. Startup waits for both the Copilot editor and model picker. Selectors are isolated in `copilot_ui.py`.
 
 Each case uses a fresh chat. The program validates the exact composer text and attached filenames before Send. After clicking Send, it requires both a cleared composer and a matching user turn. If these cannot both be proved, the case becomes `requires_review`; it is never resent automatically. A successful/failed result is accepted only after the exact final response contract is stable across repeated observations.
 
@@ -143,6 +143,7 @@ The suite covers deep paths with spaces, simulated drive resolution, required re
 - **Ambiguous attachment:** correct duplicate/gapped `_part_<n>.pdf` files; the application will not guess.
 - **Copilot login:** complete login/MFA in visible Edge and restart if readiness times out.
 - **Edge debugging endpoint timeout:** startup tries the existing validated endpoint, the requested port, an alternate loopback port, and a fresh dedicated profile within bounded time slices. A successful method is printed as a short green terminal line for VDI confirmation.
+- **Edge cannot write profile data:** close only a stale CDD Audit Edge window if present and retry. The launcher now detects an owned profile/port before launch and uses a machine-scoped detached profile to avoid collisions with ordinary Edge.
 - **Selector failure:** retain the terminal error and per-user bootstrap diagnostic path; do not repeatedly submit the case manually without checking its log state.
 - **Log lock:** close another run using the same Windows account. The batch lock prevents cross-user work, while the user-log lock prevents same-account corruption.
 - **Edge port/profile mismatch:** close the other dedicated app Edge session or select another approved port. The application never attaches to an unverified profile.

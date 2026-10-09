@@ -24,7 +24,8 @@ def get_cdp_version(endpoint: str, timeout: float = 0.75) -> dict | None:
     if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or not parsed.port:
         raise CopilotUIError("CDP must use an explicit loopback endpoint.")
     try:
-        with urllib.request.urlopen(endpoint + "/json/version", timeout=timeout) as response:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(endpoint + "/json/version", timeout=max(0.05, min(timeout, 0.75))) as response:
             payload = json.loads(response.read(65536))
     except (OSError, ValueError, json.JSONDecodeError):
         return None
@@ -132,22 +133,67 @@ class EdgeSession:
             except (OSError, subprocess.TimeoutExpired):
                 pass
 
+    @staticmethod
+    def _profile_in_use(profile: Path) -> bool:
+        if os.name != "nt" or not profile.is_dir():
+            return False
+        script = (
+            "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | "
+            "Where-Object { $_.CommandLine -match '--user-data-dir' } | "
+            "Select-Object CommandLine | ConvertTo-Json -Compress"
+        )
+        try:
+            completed = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                capture_output=True, text=True, timeout=8, check=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            records = json.loads(completed.stdout) if completed.stdout.strip() else []
+        except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError):
+            return False
+        values = records if isinstance(records, list) else [records]
+        for record in values:
+            command_line = str(record.get("CommandLine", "")) if isinstance(record, dict) else ""
+            actual = _profile_argument(command_line)
+            if actual is not None and os.path.normcase(str(actual.expanduser().resolve())) == os.path.normcase(str(profile.resolve())):
+                return True
+        return False
+
+    @staticmethod
+    def _port_in_use(port: int) -> bool:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.4):
+                return True
+        except OSError:
+            return False
+
     def _launch_attempt(self, profile: Path, port: int, timeout: float) -> bool:
         self.profile = profile.expanduser().resolve()
         self.port = port
         self.endpoint = cdp_endpoint(port)
+        if self._profile_in_use(self.profile) or self._port_in_use(port):
+            self._stop_failed_process()
+            return False
         self.profile.mkdir(parents=True, exist_ok=True)
         command = [
             str(find_edge(self.edge_path)),
             f"--remote-debugging-port={port}",
             "--remote-debugging-address=127.0.0.1",
-            "--remote-allow-origins=*",
             f"--user-data-dir={self.profile}",
             "--no-first-run",
             "--no-default-browser-check",
+            "--new-window",
             "https://m365.cloud.microsoft/chat",
         ]
-        self.process = subprocess.Popen(command)
+        options = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "close_fds": True}
+        if os.name == "nt":
+            options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        else:
+            options["start_new_session"] = True
+        try:
+            self.process = subprocess.Popen(command, **options)
+        except OSError as exc:
+            raise CopilotUIError("Microsoft Edge could not be started. Check the Edge installation and local execution policy.") from exc
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:

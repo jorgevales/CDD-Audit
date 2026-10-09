@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -170,7 +171,8 @@ def run_cli(args: argparse.Namespace) -> int:
         print("Run cancelled before Edge startup; no batch lock was retained.")
         return 0
     local_base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
-    profile = args.profile_dir or local_base / "CDD Audit" / "JustifyIPChangeCopilotChatUI" / "EdgeProfile"
+    machine_key = hashlib.sha256(os.environ.get("COMPUTERNAME", "local-machine").casefold().encode("utf-8")).hexdigest()[:16]
+    profile = args.profile_dir or local_base / "CDD Audit" / "JustifyIPChangeCopilotChatUI" / "runtime" / "edge-profiles" / ("vdi-" + machine_key)
     user_folder.mkdir(parents=True, exist_ok=True)
     adapter = PlaywrightCopilotAdapter(EdgeSession(profile, args.port, args.edge_path), model=args.model)
     result = asyncio.run(execute_queue(report, workspace, log, adapter, user=user, run_id=new_run_id()))
