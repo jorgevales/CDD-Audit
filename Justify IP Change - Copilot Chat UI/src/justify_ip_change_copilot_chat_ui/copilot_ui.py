@@ -35,6 +35,9 @@ SEND_SELECTORS = (
     "button[data-testid='submit-button']",
     "button[type='submit'][aria-label*='send' i]:not([aria-label*='stop' i])",
 )
+SINGLE_CASE_UPLOAD_TIMEOUT_SECONDS = 600
+SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS = 900_000
+TRANSFER_QUIET_SECONDS = 0.55
 ATTACH_BUTTON_SELECTORS = (
     "#plus-menu-container button[data-testid='PlusMenuButton']",
     "button[data-testid='chat-input-attach-button']",
@@ -84,11 +87,14 @@ class PlaywrightCopilotAdapter:
     raised as requiring manual review and is never resent automatically.
     """
 
-    def __init__(self, edge: EdgeSession, *, model: str | None = None, startup_timeout: float = 180, response_timeout: float = 1800) -> None:
+    def __init__(self, edge: EdgeSession, *, model: str | None = None, startup_timeout: float = 180, response_timeout: float = 1800, tab_count: int = 6) -> None:
         self.edge = edge
         self.model = model
         self.startup_timeout = startup_timeout
         self.response_timeout = response_timeout
+        self.requested_tabs = max(1, min(6, tab_count))
+        self.parallelism = 1
+        self._tab_pool: asyncio.Queue[PlaywrightCopilotAdapter] | None = None
         self.manager = None
         self.playwright = None
         self.browser = None
@@ -118,6 +124,7 @@ class PlaywrightCopilotAdapter:
         self.startup_diagnostics = {"phase": "edge_startup", "cdp_connect_attempts": 0}
         try:
             await self._start_impl()
+            await self._prepare_parallel_tabs()
         except Exception as exc:
             if not getattr(exc, "diagnostic_stage", None):
                 exc.diagnostic_stage = "copilot_startup"
@@ -167,14 +174,20 @@ class PlaywrightCopilotAdapter:
         self.startup_diagnostics["phase"] = "copilot_navigation"
         print("Edge profile verified; opening Copilot.", flush=True)
         self.context = self.browser.contexts[0]
-        retained = next(
-            (
-                page for page in self.context.pages
-                if urlparse(page.url).hostname == "m365.cloud.microsoft"
-                and urlparse(page.url).path.startswith("/chat")
-            ),
-            None,
-        )
+        chat_pages = [
+            page for page in self.context.pages
+            if urlparse(page.url).hostname == "m365.cloud.microsoft"
+            and urlparse(page.url).path.startswith("/chat")
+        ]
+        retained = None
+        for page in chat_pages:
+            try:
+                if await asyncio.wait_for(page.evaluate("() => window.name"), timeout=1) == "JustifyIPChange-Worker":
+                    retained = page
+                    break
+            except Exception:
+                continue
+        retained = retained or next(iter(chat_pages), None)
         self.startup_diagnostics.update(tab_reused=retained is not None, readiness_attempts=[], readiness_checks=0)
         self.startup_diagnostics["phase"] = "copilot_readiness"
         ready_start = time.monotonic()
@@ -184,10 +197,13 @@ class PlaywrightCopilotAdapter:
             await retained.bring_to_front()
             attempt_start = time.monotonic()
             if await self._wait_for_ready(retained, 2):
-                self._record_readiness_attempt("retained_tab", "composer_visible", attempt_start)
-                await self._finish_readiness("retained tab", "retained_tab")
-                return
-            self._record_readiness_attempt("retained_tab", "not_ready", attempt_start)
+                if await self._page_is_empty(retained):
+                    self._record_readiness_attempt("retained_tab", "composer_visible", attempt_start)
+                    await self._finish_readiness("retained tab", "retained_tab")
+                    return
+                self._record_readiness_attempt("retained_tab", "draft_present", attempt_start)
+            else:
+                self._record_readiness_attempt("retained_tab", "not_ready", attempt_start)
             # The old tab may contain an unsent draft. Never reload or navigate it.
         self.page = await asyncio.wait_for(self.context.new_page(), timeout=5)
         await self.page.bring_to_front()
@@ -266,6 +282,16 @@ class PlaywrightCopilotAdapter:
                 return False
             await asyncio.sleep(min(0.2, max(0, deadline - time.monotonic())))
 
+    async def _page_is_empty(self, page) -> bool:
+        self.page = page
+        try:
+            editor = await self._first_visible(EDITOR_SELECTORS)
+            if editor is None or (await self._editor_text(editor)).strip():
+                return False
+            return not await page.locator("button[aria-label^='Remove attachment ']").count()
+        except Exception:
+            return False
+
     async def _wait_for_sign_in(self) -> None:
         print("Microsoft sign-in is visible; complete it in Edge.", flush=True)
         attempt_start = time.monotonic()
@@ -321,6 +347,57 @@ class PlaywrightCopilotAdapter:
             state = "unknown"
         self.startup_diagnostics["document_state"] = state if state in {"loading", "interactive", "complete"} else "unknown"
 
+    async def _prepare_parallel_tabs(self) -> None:
+        """Keep one independent page per worker; reuse only marked, empty app tabs."""
+        pool: asyncio.Queue[PlaywrightCopilotAdapter] = asyncio.Queue()
+        pool.put_nowait(self)
+        used = {id(self.page)}
+        try:
+            await self.page.evaluate("() => { window.name = 'JustifyIPChange-Worker'; }")
+        except Exception:
+            pass
+        for number in range(2, self.requested_tabs + 1):
+            slot = PlaywrightCopilotAdapter(
+                self.edge, model=self.model, startup_timeout=self.startup_timeout,
+                response_timeout=self.response_timeout, tab_count=1,
+            )
+            slot.browser = self.browser
+            slot.context = self.context
+            candidate = None
+            for page in self.context.pages:
+                if id(page) in used or self._page_category(page) != "copilot":
+                    continue
+                try:
+                    marker = await asyncio.wait_for(page.evaluate("() => window.name"), timeout=1)
+                    if marker != "JustifyIPChange-Worker":
+                        continue
+                    if await slot._wait_for_ready(page, 2):
+                        editor = await slot._first_visible(EDITOR_SELECTORS)
+                        attachments = await page.locator("button[aria-label^='Remove attachment ']").count()
+                        if editor is not None and not (await slot._editor_text(editor)).strip() and not attachments:
+                            candidate = page
+                            break
+                except Exception:
+                    continue
+            if candidate is None:
+                try:
+                    candidate = await asyncio.wait_for(self.context.new_page(), timeout=5)
+                    await candidate.goto(COPILOT_URL, wait_until="commit", timeout=10000)
+                    if not await slot._wait_for_ready(candidate, 10):
+                        raise CopilotUIError("Parallel Copilot tab did not become ready.")
+                    if self.model:
+                        await slot._select_model(self.model)
+                    await candidate.evaluate("() => { window.name = 'JustifyIPChange-Worker'; }")
+                except Exception as exc:
+                    print(f"WARNING: parallel tab {number} is unavailable ({type(exc).__name__}); continuing with ready tabs.", flush=True)
+                    break
+            slot.page = candidate
+            used.add(id(candidate))
+            pool.put_nowait(slot)
+        self._tab_pool = pool
+        self.parallelism = pool.qsize()
+        print(f"Parallel Copilot tabs ready: {self.parallelism}/{self.requested_tabs}.", flush=True)
+
     async def _fresh_chat(self) -> None:
         await self.page.goto(COPILOT_URL, wait_until="commit", timeout=30000)
         existing = self.page.locator("[data-testid='chatQuestion'],.fai-UserMessage")
@@ -331,6 +408,8 @@ class PlaywrightCopilotAdapter:
                 deadline = time.monotonic() + 10
                 while await existing.count() and time.monotonic() < deadline:
                     await asyncio.sleep(0.1)
+            if await existing.count():
+                raise CopilotUIError("A fresh Copilot chat could not be proven; no case was sent.")
         editor = await self._first_visible(EDITOR_SELECTORS, 30)
         if editor is None:
             raise CopilotUIError("A fresh Copilot composer did not become available.")
@@ -352,19 +431,79 @@ class PlaywrightCopilotAdapter:
             inputs = self.page.locator(",".join(ATTACH_SELECTORS))
         if not await inputs.count():
             raise CopilotUIError("The Copilot file input did not become available.")
-        await inputs.first.set_input_files([str(path) for path in item.attachments.paths])
-        expected = {path.name.casefold() for path in item.attachments.paths}
-        deadline = time.monotonic() + 180
+        await inputs.first.set_input_files(
+            [str(path) for path in item.attachments.paths], timeout=SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS
+        )
+        expected = [path.name.casefold() for path in item.attachments.paths]
+        deadline = time.monotonic() + SINGLE_CASE_UPLOAD_TIMEOUT_SECONDS
+        stable_since = None
+        retry_count = 0
+        last_notice = time.monotonic()
         while time.monotonic() < deadline:
-            names = await self.page.locator("button[aria-label^='Remove attachment ']").evaluate_all(
-                "nodes => nodes.map(n => (n.getAttribute('aria-label') || '').replace(/^Remove attachment /i, ''))"
+            state = await self._attachment_state(expected)
+            self.case_diagnostics.update(
+                attachment_chips=state["chip_count"],
+                attachment_matched=state["matched_count"],
+                upload_active=state["active"],
+                upload_retry_count=retry_count,
             )
-            if expected <= {str(name).casefold() for name in names}:
-                send = await self._first_visible(SEND_SELECTORS)
-                if send is not None and await send.is_enabled():
+            if state["upload_error"] and retry_count < 4:
+                retry = self.page.get_by_role("button", name=re.compile(r"^Try again$", re.I))
+                if await retry.count() and await retry.first.is_visible():
+                    await retry.first.click()
+                    retry_count += 1
+                    stable_since = None
+                    await asyncio.sleep(2)
+                    continue
+            complete = (state["chip_count"] >= len(expected) and state["matched_count"] == len(expected)
+                        and not state["active"] and not state["upload_error"] and state["send_enabled"])
+            if complete:
+                stable_since = stable_since or time.monotonic()
+                if time.monotonic() - stable_since >= TRANSFER_QUIET_SECONDS:
                     return
+            else:
+                stable_since = None
+            if time.monotonic() - last_notice >= 15:
+                print(
+                    f"Waiting for document transfer: {state['matched_count']}/{len(expected)} attachments visible; "
+                    f"{'transfer active' if state['active'] else 'verifying readiness'}.",
+                    flush=True,
+                )
+                last_notice = time.monotonic()
             await asyncio.sleep(0.25)
-        raise CopilotUIError("Attachments did not finish loading before the bounded timeout.")
+        raise CopilotUIError("Documents did not reach a stable, fully transferred state before the single-case timeout. Send was not clicked.")
+
+    async def _attachment_state(self, expected_names: list[str]) -> dict[str, object]:
+        return await self.page.evaluate(r"""names => {
+            const visible = e => !!(e && (e.offsetWidth || e.offsetHeight || e.getClientRects().length));
+            const norm = s => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const roots = new Set();
+            for (const selector of ['button[aria-label^="Remove attachment "]',
+                '[aria-label="Attachments"] > [data-overflow-item="true"]',
+                '[aria-label="Attachments"] > div[id^="SPO_"]']) {
+                for (const node of document.querySelectorAll(selector)) {
+                    roots.add(node.closest('[data-overflow-item="true"],div[id^="SPO_"]') || node);
+                }
+            }
+            const labels = [...roots].map(e => norm([e.innerText, e.textContent,
+                e.getAttribute('aria-label'), e.getAttribute('title')].filter(Boolean).join(' ')));
+            const activeSelectors = ['[aria-busy="true"]', '[role="progressbar"]',
+                '[data-testid*="progress" i]', '[data-testid*="upload" i] [class*="spinner" i]',
+                '[class*="attachment" i] [class*="spinner" i]'];
+            const active = activeSelectors.some(s => [...document.querySelectorAll(s)].some(visible)) ||
+                labels.some(s => /uploading|processing|attaching|scanning|loading|preparing|transferring|pending|in progress/i.test(s));
+            const alertText = [...document.querySelectorAll('[role="alert"]')]
+                .filter(visible).map(e => norm(e.innerText || e.textContent)).join(' ');
+            const uploadError = /error occurred while uploading|upload failed/i.test(alertText);
+            const send = [...document.querySelectorAll('button')].find(e => {
+                const label = norm(e.getAttribute('aria-label'));
+                return visible(e) && (label === 'send' || label.startsWith('send ')) && !label.includes('stop');
+            });
+            return {chip_count: roots.size,
+                matched_count: names.filter(n => labels.some(label => label.includes(norm(n)))).length,
+                active, upload_error: uploadError,
+                send_enabled: !!(send && !send.disabled && send.getAttribute('aria-disabled') !== 'true')};
+        }""", expected_names)
 
     async def _select_model(self, label: str) -> None:
         picker = await self._first_visible(MODEL_PICKER_SELECTORS, 10)
@@ -400,6 +539,15 @@ class PlaywrightCopilotAdapter:
         return candidates[-1] if candidates else ""
 
     async def process(self, item: QueueItem) -> CaseOutcome:
+        if self._tab_pool is None:
+            return await self._process_one(item)
+        slot = await self._tab_pool.get()
+        try:
+            return await slot._process_one(item)
+        finally:
+            self._tab_pool.put_nowait(slot)
+
+    async def _process_one(self, item: QueueItem) -> CaseOutcome:
         self.case_diagnostics = {"phase": "fresh_chat", "attachment_count": len(item.attachments.paths), "send_attempted": False}
         try:
             return await self._process_impl(item)
@@ -411,8 +559,6 @@ class PlaywrightCopilotAdapter:
 
     async def _process_impl(self, item: QueueItem) -> CaseOutcome:
         await self._fresh_chat()
-        self.case_diagnostics["phase"] = "attachment_upload"
-        await self._attach(item)
         self.case_diagnostics["phase"] = "composer_fill"
         editor = await self._first_visible(EDITOR_SELECTORS, 10)
         if editor is None:
@@ -421,6 +567,8 @@ class PlaywrightCopilotAdapter:
         actual = (await self._editor_text(editor)).replace("\r\n", "\n").strip()
         if actual != item.prompt.strip():
             raise CopilotUIError("The Copilot composer did not preserve the complete prompt; Send was not clicked.")
+        self.case_diagnostics["phase"] = "attachment_upload"
+        await self._attach(item)
         send = await self._first_visible(SEND_SELECTORS, 10)
         if send is None or not await send.is_enabled():
             raise CopilotUIError("The Copilot Send control is not ready.")
@@ -479,4 +627,5 @@ class PlaywrightCopilotAdapter:
             self.browser = None
             self.context = None
             self.page = None
+            self._tab_pool = None
             self.edge.close_owned()

@@ -21,13 +21,16 @@ workspace selection
   -> one deterministic continuous queue
   -> acquire every selected batch lock
   -> visible Edge/Copilot session
-  -> fresh chat per case
+  -> up to six independent Copilot tab workers
+  -> fresh chat and verified upload per case
   -> durable outcome append
   -> remaining-count update
   -> release locks
 ```
 
 Queue items retain their source batch. UI code never decides eligibility or persistence. A UI send ambiguity becomes `requires_review`, which is deliberately distinct from retryable failure.
+
+The adapter keeps one page per worker, reuses only marked app tabs with empty composers, and opens new tabs when needed. A freed worker takes the next case from the shared queue. File assignment has the original single-case 900-second allowance; transfer verification has a separate 600-second limit and requires expected attachment chips, no active upload indicators, and an enabled Send control to stay stable. Prompt entry happens before that Send-gate check. No case is submitted merely because file chips appeared.
 
 ## Concurrency boundary
 

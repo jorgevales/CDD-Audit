@@ -26,10 +26,12 @@ _EDITOR_COUNT_KEYS = {"primary_editor", "testid_editor", "role_textbox", "messag
 _DIAGNOSTIC_FLAGS = {
     "tab_reused", "editor_visible", "model_picker_visible", "editor_in_frame",
     "login_indicator", "access_denied_indicator", "send_attempted",
+    "upload_active",
 }
 _DIAGNOSTIC_COUNTS = {
     "cdp_connect_attempts", "cdp_context_count", "attachment_count", "elapsed_ms",
     "readiness_elapsed_ms", "readiness_checks", "frame_count", *_EDITOR_COUNT_KEYS,
+    "attachment_chips", "attachment_matched", "upload_retry_count",
 }
 _DIAGNOSTIC_PORTS = {"requested_port", "selected_port", "port"}
 _ERROR_TYPES = {
@@ -56,7 +58,7 @@ _DIAGNOSTIC_ENUMS = {
     "readiness_method": {"retained_tab", "new_tab", "new_tab_navigation_retry", "sign_in_completed"},
     "result": {
         "ready", "validated", "rejected", "absent", "policy_blocked", "failed", "exception",
-        "composer_visible", "not_ready", "navigation_timeout", "navigation_error", "auth_required",
+        "composer_visible", "not_ready", "draft_present", "navigation_timeout", "navigation_error", "auth_required",
     },
     "reason": _EDGE_FAILURES | _ERROR_TYPES,
     "last_failure": _EDGE_FAILURES,

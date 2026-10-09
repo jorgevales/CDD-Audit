@@ -10,7 +10,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -21,11 +21,78 @@ from justify_ip_change_copilot_chat_ui.edge_session import EdgeSession, _profile
 from justify_ip_change_copilot_chat_ui.errors import CopilotUIError
 from justify_ip_change_copilot_chat_ui.profile_storage import default_edge_profile
 from justify_ip_change_copilot_chat_ui.copilot_ui import (
-    ATTACH_BUTTON_SELECTORS, EDITOR_SELECTORS, SEND_SELECTORS, PlaywrightCopilotAdapter,
+    ATTACH_BUTTON_SELECTORS, EDITOR_SELECTORS, SEND_SELECTORS,
+    SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS, SINGLE_CASE_UPLOAD_TIMEOUT_SECONDS,
+    PlaywrightCopilotAdapter,
 )
 
 
 class EdgeSessionTests(unittest.TestCase):
+    def test_original_single_case_upload_budgets_are_preserved(self):
+        self.assertEqual(SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS, 900_000)
+        self.assertEqual(SINGLE_CASE_UPLOAD_TIMEOUT_SECONDS, 600)
+
+    def test_attachment_chips_alone_do_not_finish_transfer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
+            file_input = SimpleNamespace(set_input_files=AsyncMock())
+            inputs = SimpleNamespace(count=AsyncMock(return_value=1), first=file_input)
+            adapter.page = SimpleNamespace(locator=Mock(return_value=inputs))
+            item = SimpleNamespace(attachments=SimpleNamespace(paths=(Path("first.pdf"), Path("second.pdf"))))
+            busy = {"chip_count": 2, "matched_count": 2, "active": True, "upload_error": False, "send_enabled": True}
+            ready = {**busy, "active": False}
+            with patch.object(adapter, "_attachment_state", new=AsyncMock(side_effect=[busy, ready])) as snapshot, patch(
+                "justify_ip_change_copilot_chat_ui.copilot_ui.TRANSFER_QUIET_SECONDS", 0
+            ), patch("justify_ip_change_copilot_chat_ui.copilot_ui.asyncio.sleep", new=AsyncMock()):
+                asyncio.run(adapter._attach(item))
+            self.assertEqual(snapshot.await_count, 2)
+            self.assertEqual(file_input.set_input_files.await_args.kwargs["timeout"], 900_000)
+
+    def test_prompt_is_filled_before_upload_and_no_send_occurs_on_upload_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
+            events = []
+            async def fill(_):
+                events.append("fill")
+            async def attach(_):
+                events.append("attach")
+                raise CopilotUIError("synthetic pre-send upload failure")
+            editor = SimpleNamespace(fill=fill)
+            item = SimpleNamespace(prompt="synthetic prompt", attachments=SimpleNamespace(paths=(Path("first.pdf"),)))
+            with patch.object(adapter, "_fresh_chat", new=AsyncMock()), patch.object(
+                adapter, "_first_visible", new=AsyncMock(return_value=editor)
+            ), patch.object(adapter, "_editor_text", new=AsyncMock(return_value=item.prompt)), patch.object(
+                adapter, "_attach", side_effect=attach
+            ):
+                with self.assertRaises(CopilotUIError):
+                    asyncio.run(adapter.process(item))
+            self.assertEqual(events, ["fill", "attach"])
+            self.assertFalse(adapter.case_diagnostics["send_attempted"])
+
+    def test_parallel_tab_pool_reuses_marked_empty_tab_then_creates_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"), tab_count=3)
+            main = SimpleNamespace(url="https://m365.cloud.microsoft/chat", evaluate=AsyncMock())
+            existing = SimpleNamespace(
+                url="https://m365.cloud.microsoft/chat", evaluate=AsyncMock(return_value="JustifyIPChange-Worker"),
+                locator=Mock(return_value=SimpleNamespace(count=AsyncMock(return_value=0))),
+            )
+            fresh = SimpleNamespace(
+                url="https://m365.cloud.microsoft/chat", goto=AsyncMock(), evaluate=AsyncMock(),
+            )
+            context = SimpleNamespace(pages=[main, existing], new_page=AsyncMock(return_value=fresh))
+            adapter.page = main
+            adapter.context = context
+            adapter.browser = SimpleNamespace(contexts=[context])
+            with patch.object(PlaywrightCopilotAdapter, "_wait_for_ready", new=AsyncMock(return_value=True)), patch.object(
+                PlaywrightCopilotAdapter, "_first_visible", new=AsyncMock(return_value=object())
+            ), patch.object(PlaywrightCopilotAdapter, "_editor_text", new=AsyncMock(return_value="")):
+                asyncio.run(adapter._prepare_parallel_tabs())
+            self.assertEqual(adapter.parallelism, 3)
+            self.assertEqual(adapter._tab_pool.qsize(), 3)
+            context.new_page.assert_awaited_once()
+            fresh.goto.assert_awaited_once()
+
     def test_working_agent_editor_attachment_and_send_variants_are_available(self):
         self.assertIn("#m365-chat-editor-target-element", EDITOR_SELECTORS)
         self.assertIn("button[data-testid='chat-input-attach-button']", ATTACH_BUTTON_SELECTORS)
@@ -178,7 +245,9 @@ class EdgeSessionTests(unittest.TestCase):
             output = io.StringIO()
             with patch("justify_ip_change_copilot_chat_ui.copilot_ui.validate_existing_profile"), patch.object(
                 adapter, "_wait_for_ready", new=AsyncMock(return_value=True), create=True
-            ) as ready, patch.object(adapter, "process", new=AsyncMock()) as process, contextlib.redirect_stdout(output):
+            ) as ready, patch.object(adapter, "_page_is_empty", new=AsyncMock(return_value=True)), patch.object(
+                adapter, "process", new=AsyncMock()
+            ) as process, contextlib.redirect_stdout(output):
                 asyncio.run(adapter._activate_copilot())
             context.new_page.assert_not_awaited()
             page.goto.assert_not_awaited()
@@ -191,6 +260,20 @@ class EdgeSessionTests(unittest.TestCase):
             self.assertIn("\033[92m", output.getvalue())
             self.assertIn("retained tab", output.getvalue())
             self.assertEqual(output.getvalue().count("retained tab"), 1)
+
+    def test_retained_tab_with_draft_is_preserved_and_new_tab_is_used(self):
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
+            old = SimpleNamespace(url="https://m365.cloud.microsoft/chat", evaluate=AsyncMock(return_value="JustifyIPChange-Worker"), bring_to_front=AsyncMock(), goto=AsyncMock())
+            fresh = SimpleNamespace(url="https://m365.cloud.microsoft/chat", bring_to_front=AsyncMock(), goto=AsyncMock())
+            adapter.browser = SimpleNamespace(contexts=[SimpleNamespace(pages=[old], new_page=AsyncMock(return_value=fresh))])
+            with patch("justify_ip_change_copilot_chat_ui.copilot_ui.validate_existing_profile"), patch.object(
+                adapter, "_wait_for_ready", new=AsyncMock(return_value=True)
+            ), patch.object(adapter, "_page_is_empty", new=AsyncMock(return_value=False)):
+                asyncio.run(adapter._activate_copilot())
+            old.goto.assert_not_awaited()
+            fresh.goto.assert_awaited_once()
+            self.assertIs(adapter.page, fresh)
 
     def test_unready_retained_tab_opens_one_new_tab_without_touching_old_tab(self):
         with tempfile.TemporaryDirectory() as directory:

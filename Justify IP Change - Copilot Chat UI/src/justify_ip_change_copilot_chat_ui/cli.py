@@ -35,6 +35,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="validate and print the queue without opening Edge or writing the user log")
     parser.add_argument("--retry-review-required", action="store_true", help="explicitly requeue uncertain prior submissions after operator review")
     parser.add_argument("--port", type=int, default=9445)
+    parser.add_argument("--tabs", type=int, default=6, help="parallel Copilot tabs to use (1-6; default: 6)")
     parser.add_argument("--edge-path", type=Path)
     parser.add_argument("--profile-dir", type=Path)
     parser.add_argument("--model", help="exact visible Copilot model label; retain the account's current choice when omitted")
@@ -149,6 +150,8 @@ def _print_preflight(workspace, user, log_path, report) -> None:
 
 def run_cli(args: argparse.Namespace) -> int:
     global _LAST_WORKSPACE
+    if not 1 <= args.tabs <= 6:
+        raise ApplicationError("--tabs must be between 1 and 6.")
     workspace = _select_workspace(args)
     _LAST_WORKSPACE = workspace
     resources = validate_runtime_resources(workspace)
@@ -185,7 +188,10 @@ def run_cli(args: argparse.Namespace) -> int:
         return 0
     profile = args.profile_dir or default_edge_profile()
     user_folder.mkdir(parents=True, exist_ok=True)
-    adapter = PlaywrightCopilotAdapter(EdgeSession(profile, args.port, args.edge_path), model=args.model)
+    adapter = PlaywrightCopilotAdapter(
+        EdgeSession(profile, args.port, args.edge_path), model=args.model,
+        tab_count=min(args.tabs, len(report.queue)),
+    )
     result = asyncio.run(execute_queue(report, workspace, log, adapter, user=user, run_id=new_run_id()))
     print(
         f"Run finished: processed {result.processed}, successful {result.successful}, "

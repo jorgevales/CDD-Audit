@@ -38,7 +38,8 @@ async def execute_queue(
     with locks:
         try:
             await adapter.start()
-            for item in report.queue:
+            async def handle_item(item):
+                nonlocal processed, successful, failed, review
                 print(f"Processing {item.batch.name}: change_id {item.case.change_id}")
                 try:
                     outcome = await adapter.process(item)
@@ -93,6 +94,27 @@ async def execute_queue(
                 failed += status == "failed"
                 review += status in {"requires_review", "inconclusive_review_needed"}
                 progress.recorded(f"last outcome: {status}")
+            pending: asyncio.Queue = asyncio.Queue()
+            for item in report.queue:
+                pending.put_nowait(item)
+            async def worker() -> None:
+                while True:
+                    try:
+                        item = pending.get_nowait()
+                    except asyncio.QueueEmpty:
+                        return
+                    try:
+                        await handle_item(item)
+                    finally:
+                        pending.task_done()
+            workers = [asyncio.create_task(worker()) for _ in range(min(len(report.queue), max(1, int(getattr(adapter, "parallelism", 1)))))]
+            try:
+                await asyncio.gather(*workers)
+            finally:
+                for task in workers:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*workers, return_exceptions=True)
         finally:
             pending_error = sys.exc_info()[1]
             try:

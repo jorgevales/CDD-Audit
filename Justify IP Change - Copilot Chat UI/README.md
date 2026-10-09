@@ -1,6 +1,6 @@
 # Justify IP Change - Copilot Chat UI
 
-This self-contained Step 08 application submits one continuous queue of eligible interested-party change cases to the visible Microsoft 365 Copilot Chat UI. It supports multiple selected batches, durable per-user results, shared batch locking, safe interruption, and later resume.
+This self-contained Step 08 application submits one continuous queue of eligible interested-party change cases to the visible Microsoft 365 Copilot Chat UI. It supports multiple selected batches, up to six parallel Copilot tabs by default (`--tabs 1` through `--tabs 6`), durable per-user results, shared batch locking, safe interruption, and later resume.
 
 The source project and operational workspace are separate. The source can live anywhere beneath the shared CDD Audit checkout. Operational prompts, workbooks, case documents, PDFs, locks, and user logs always remain in the selected shared workspace and are never written into this repository.
 
@@ -105,7 +105,7 @@ Edge always runs visibly with a dedicated per-user, machine-scoped profile under
 
 After connection, startup checks a retained Copilot tab with the known editor variants first. If its composer is not visible promptly, it opens a new tab in that same verified Edge context and navigates to Copilot; any further navigation retry is confined to the new tab. A retained tab is never refreshed or redirected merely because its composer is missing, preserving an existing conversation or unsent draft. The first method that actually exposes a visible composer is printed as a short green `Copilot readiness method:` line for VDI feedback. With no explicit `--model`, the queue starts at that point; with `--model`, the requested model must also be selected. These recovery steps are bounded, and interactive sign-in or tenant access can still require operator action. Selectors are isolated in `copilot_ui.py`.
 
-Each case uses a fresh chat. The program validates the exact composer text and attached filenames before Send. After clicking Send, it requires both a cleared composer and a matching user turn. If these cannot both be proved, the case becomes `requires_review`; it is never resent automatically. A successful/failed result is accepted only after the exact final response contract is stable across repeated observations.
+Each tab processes one case at a time and takes the next case when free; marked, empty app tabs are reused before new tabs are opened. Each case uses a fresh chat. The program fills and verifies the exact composer text before assigning files, then allows up to 900 seconds for single-case file assignment and 600 seconds for upload completion. Attachment chips alone do not prove completion: all expected files, a quiet transfer state, and a continuously enabled Send control are required. It can use Copilot's own `Try again` upload control without blindly reassigning files. After clicking Send, it requires both a cleared composer and a matching user turn. If these cannot both be proved, the case becomes `requires_review`; it is never resent automatically. A successful/failed result is accepted only after the exact final response contract is stable across repeated observations.
 
 ## Dry run and tests
 

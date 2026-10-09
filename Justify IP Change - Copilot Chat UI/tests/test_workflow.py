@@ -474,6 +474,28 @@ class QueueLogAndLockTests(unittest.TestCase):
         resumed = self.preflight()
         self.assertEqual([item.key for item in resumed.queue], [report.queue[1].key])
 
+    def test_parallel_queue_uses_three_workers_without_duplicate_cases(self):
+        report = self.preflight()
+        class ParallelAdapter(SimulationAdapter):
+            parallelism = 3
+            active = 0
+            peak = 0
+            async def process(self, item):
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+                await asyncio.sleep(0.01)
+                self.active -= 1
+                return await super().process(item)
+        adapter = ParallelAdapter()
+        result = asyncio.run(execute_queue(report, self.workspace, self.log, adapter, user="synthetic.user", run_id="parallel"))
+        self.assertEqual(result.processed, len(report.queue))
+        self.assertEqual(adapter.peak, 3)
+        self.assertEqual(len(adapter.processed), len(set(adapter.processed)))
+        self.assertEqual(len(self.log.records()), len(report.queue))
+
+    def test_default_tab_count_matches_original_six_tab_run(self):
+        self.assertEqual(parse_args([]).tabs, 6)
+
     def test_interruption_is_durably_logged_and_resumable(self):
         report = self.preflight([self.batches[0]])
 
