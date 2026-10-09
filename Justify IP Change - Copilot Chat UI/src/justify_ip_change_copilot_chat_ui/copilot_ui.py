@@ -423,12 +423,24 @@ class PlaywrightCopilotAdapter:
         return await editor.input_value() if tag in {"textarea", "input"} else await editor.inner_text()
 
     async def _attach(self, item: QueueItem) -> None:
-        inputs = await self._ensure_attachment_input()
-        await inputs.first.set_input_files(
-            [str(path) for path in item.attachments.paths], timeout=SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS
-        )
-        expected = [path.name.casefold() for path in item.attachments.paths]
+        paths = item.attachments.paths
+        file_input = await self._ensure_attachment_input(paths)
         deadline = time.monotonic() + SINGLE_CASE_UPLOAD_TIMEOUT_SECONDS
+        multiple = await file_input.get_attribute("multiple") is not None
+        self.case_diagnostics["attachment_assignment_mode"] = "bulk" if multiple else "sequential"
+        if multiple or len(paths) == 1:
+            await file_input.set_input_files(
+                [str(path) for path in paths], timeout=SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS
+            )
+        else:
+            for index, path in enumerate(paths):
+                if index:
+                    file_input = await self._ensure_attachment_input((path,))
+                await file_input.set_input_files([str(path)], timeout=SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS)
+                await self._wait_for_attachment_chips(
+                    [candidate.name.casefold() for candidate in paths[:index + 1]], deadline
+                )
+        expected = [path.name.casefold() for path in paths]
         stable_since = None
         retry_count = 0
         last_notice = time.monotonic()
@@ -466,40 +478,114 @@ class PlaywrightCopilotAdapter:
             await asyncio.sleep(0.25)
         raise CopilotUIError("Documents did not reach a stable, fully transferred state before the single-case timeout. Send was not clicked.")
 
-    async def _ensure_attachment_input(self):
-        """Wait for the React picker; opening Add may only expose an Upload menu."""
-        inputs = self.page.locator(",".join(ATTACH_SELECTORS))
+    async def _wait_for_attachment_chips(self, expected: list[str], deadline: float) -> None:
+        """In a single-file picker, let React accept each file before replacing it."""
+        while time.monotonic() < deadline:
+            state = await self._attachment_state(expected)
+            self.case_diagnostics.update(
+                attachment_chips=state["chip_count"], attachment_matched=state["matched_count"],
+            )
+            if state["chip_count"] >= len(expected) and state["matched_count"] == len(expected):
+                return
+            await asyncio.sleep(0.25)
+        raise CopilotUIError("A document did not appear in the Copilot attachment list before the upload timeout. Send was not clicked.")
+
+    @staticmethod
+    def _accepts_documents(accept: str | None, paths: tuple) -> bool:
+        if not accept:
+            return True
+        tokens = {part.strip().casefold() for part in accept.split(",")}
+        if "*/*" in tokens or "*" in tokens:
+            return True
+        mime = {".pdf": "application/pdf", ".md": "text/markdown", ".txt": "text/plain"}
+        return all(
+            path.suffix.casefold() in tokens
+            or mime.get(path.suffix.casefold(), "") in tokens
+            or ("application/*" in tokens and path.suffix.casefold() == ".pdf")
+            or ("text/*" in tokens and path.suffix.casefold() in {".md", ".txt"})
+            for path in paths
+        )
+
+    async def _best_attachment_input(self, paths: tuple, *, allow_single: bool = False):
+        """Choose a live document input, not an unrelated feedback/image picker."""
+        inputs = self.page.locator("input[type='file']")
+        best = None
+        best_score = -1
+        for index in range(min(await inputs.count(), 30)):
+            candidate = inputs.nth(index)
+            try:
+                if not await candidate.is_enabled():
+                    continue
+                multiple = await candidate.get_attribute("multiple") is not None
+                if len(paths) > 1 and not multiple and not allow_single:
+                    continue
+                accept = await candidate.get_attribute("accept")
+                if not self._accepts_documents(accept, paths):
+                    continue
+                parent = await candidate.evaluate(
+                    "node => !!node.closest('#plus-menu-container,[aria-label=\"Attachments\"]')"
+                )
+                score = (40 if accept else 0) + (20 if multiple else 0) + (10 if parent else 0)
+                if score >= best_score:
+                    best, best_score = candidate, score
+            except Exception:
+                continue
+        return best
+
+    async def _ensure_attachment_input(self, paths: tuple = ()):
+        """Wait for a document-capable React picker; Add may expose an Upload menu."""
         deadline = time.monotonic() + 10
         attempt = 0
+        last_error_type = None
         while True:
-            if await inputs.count():
-                return inputs
+            selected = await self._best_attachment_input(paths)
+            if selected is not None:
+                return selected
             if time.monotonic() >= deadline:
                 break
             attempt += 1
             try:
                 button = await self._first_visible(ATTACH_BUTTON_SELECTORS)
                 if button is not None:
-                    await button.click(timeout=700, no_wait_after=True)
-                if await inputs.count():
-                    return inputs
+                    # DOM activation also works on background worker tabs. A
+                    # Playwright pointer click can time out when several tabs
+                    # are uploading concurrently.
+                    try:
+                        await button.evaluate("node => { if (!node.disabled) node.click(); }")
+                    except Exception:
+                        await button.click(timeout=700, force=True, no_wait_after=True)
+                await asyncio.sleep(0.35)
+                selected = await self._best_attachment_input(paths)
+                if selected is not None:
+                    return selected
+                if attempt == 1 and len(paths) > 1:
+                    selected = await self._best_attachment_input(paths, allow_single=True)
+                    if selected is not None:
+                        return selected
                 upload = self.page.get_by_role(
                     "menuitem", name=re.compile(r"upload|device|computer|browse", re.I)
                 )
                 if await upload.count() and await upload.first.is_visible():
-                    await upload.first.click(timeout=700, no_wait_after=True)
-                if await inputs.count():
-                    return inputs
-                if attempt % 3 == 0:
-                    await self.page.evaluate(r"""() => {
-                        const button = document.querySelector(
-                            'button[data-testid="chat-input-attach-button"],button[data-test-id="chat-input-attach-button"],#plus-menu-container button,button[aria-label="Add"]');
-                        if (button && !button.disabled) button.click();
-                    }""")
-            except Exception:
-                pass
-            await asyncio.sleep(0.1)
-        raise CopilotUIError("The Copilot file input did not become available after bounded picker recovery. No case was sent.")
+                    try:
+                        await upload.first.evaluate("node => { if (!node.disabled) node.click(); }")
+                    except Exception:
+                        await upload.first.click(timeout=700, force=True, no_wait_after=True)
+                    await asyncio.sleep(0.25)
+                selected = await self._best_attachment_input(paths)
+                if selected is not None:
+                    return selected
+                if len(paths) > 1:
+                    selected = await self._best_attachment_input(paths, allow_single=True)
+                    if selected is not None:
+                        return selected
+            except Exception as exc:
+                last_error_type = type(exc).__name__
+            await asyncio.sleep(0.15)
+        self.case_diagnostics.update(
+            attachment_picker_attempts=attempt,
+            attachment_picker_error_type=last_error_type,
+        )
+        raise CopilotUIError("A compatible Copilot document input did not become available after bounded picker recovery. No case was sent.")
 
     async def _attachment_state(self, expected_names: list[str]) -> dict[str, object]:
         return await self.page.evaluate(r"""names => {

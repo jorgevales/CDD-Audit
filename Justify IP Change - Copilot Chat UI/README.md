@@ -105,7 +105,7 @@ Edge always runs visibly with a dedicated per-user, machine-scoped profile under
 
 After connection, startup checks a retained Copilot tab with the known editor variants first. If its composer is not visible promptly, it opens a new tab in that same verified Edge context and navigates to Copilot; any further navigation retry is confined to the new tab. A retained tab is never refreshed or redirected merely because its composer is missing, preserving an existing conversation or unsent draft. The first method that actually exposes a visible composer is printed as a short green `Copilot readiness method:` line for VDI feedback. With no explicit `--model`, the queue starts at that point; with `--model`, the requested model must also be selected. These recovery steps are bounded, and interactive sign-in or tenant access can still require operator action. Selectors are isolated in `copilot_ui.py`.
 
-Each tab processes one case at a time and takes the next case when free; marked, empty app tabs are reused before new tabs are opened. Each case uses a fresh chat. The program fills and verifies the exact composer text, allows the attachment menu up to 10 seconds to expose a file input, then allows up to 900 seconds for single-case file assignment and 600 seconds for upload completion. Attachment chips alone do not prove completion: all expected files, a quiet transfer state, and a continuously enabled Send control are required. It can use Copilot's own `Try again` upload control without blindly reassigning files. After clicking Send, it requires both a cleared composer and a matching user turn. If these cannot both be proved, the case becomes `requires_review`; it is never resent automatically. A successful/failed result is accepted only after the exact final response contract is stable across repeated observations.
+Each tab processes one case at a time and takes the next case when free; marked, empty app tabs are reused before new tabs are opened. Each case uses a fresh chat. The program fills and verifies the exact composer text, allows the attachment menu up to 10 seconds to expose a document-capable file input, then allows up to 900 seconds for file assignment and 600 seconds for upload completion. It ignores unrelated image/feedback pickers, activates Add reliably in background tabs, and assigns documents sequentially if Copilot exposes only a single-file input. Attachment chips alone do not prove completion: all expected files, a quiet transfer state, and a continuously enabled Send control are required. It can use Copilot's own `Try again` upload control without blindly reassigning files. After clicking Send, it requires both a cleared composer and a matching user turn. If these cannot both be proved, the case becomes `requires_review`; it is never resent automatically. A successful/failed result is accepted only after the exact final response contract is stable across repeated observations.
 
 ## Dry run and tests
 
@@ -122,6 +122,14 @@ Run Tests.cmd
 ```
 
 The suite covers deep paths with spaces, simulated drive resolution, required resources, exactly 100 cases, a short final batch, completed-batch rules, continuous multi-batch ordering, successful/failed/interrupted/uncertain states, all-success-without-output warnings, merged-PDF ambiguity and sequences, append-only logs, contested batch locks, interruption, and resume.
+
+On a Windows machine with Edge installed, run the opt-in browser test with synthetic files:
+
+```powershell
+.venv\Scripts\python.exe tests\live_edge_simulated.py
+```
+
+This uses real Edge to exercise six parallel tabs, delayed file inputs, document upload/readiness, Send timing, and a single-file-picker fallback against a local synthetic page. It neither signs in to Microsoft 365 nor sends a case to the tenant; live VDI acceptance remains separate.
 
 ## VDI deployment
 

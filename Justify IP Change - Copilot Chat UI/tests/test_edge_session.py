@@ -35,30 +35,57 @@ class EdgeSessionTests(unittest.TestCase):
     def test_attachment_picker_waits_for_delayed_file_input(self):
         with tempfile.TemporaryDirectory() as directory:
             adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
-            inputs = SimpleNamespace(count=AsyncMock(side_effect=[0, 0, 1]))
+            file_input = object()
             button = SimpleNamespace(click=AsyncMock())
             menu = SimpleNamespace(count=AsyncMock(return_value=0))
-            adapter.page = SimpleNamespace(locator=Mock(return_value=inputs), get_by_role=Mock(return_value=menu))
-            with patch.object(adapter, "_first_visible", new=AsyncMock(return_value=button)):
+            adapter.page = SimpleNamespace(get_by_role=Mock(return_value=menu))
+            with patch.object(adapter, "_first_visible", new=AsyncMock(return_value=button)), patch.object(
+                adapter, "_best_attachment_input", new=AsyncMock(side_effect=[None, None, file_input])
+            ):
                 found = asyncio.run(adapter._ensure_attachment_input())
-            self.assertIs(found, inputs)
+            self.assertIs(found, file_input)
             button.click.assert_awaited_once()
+
+    def test_attachment_accept_filter_rejects_unrelated_image_input(self):
+        paths = (Path("one.pdf"), Path("two.md"))
+        self.assertFalse(PlaywrightCopilotAdapter._accepts_documents("image/png", paths))
+        self.assertTrue(PlaywrightCopilotAdapter._accepts_documents(".pdf,.md", paths))
+        self.assertTrue(PlaywrightCopilotAdapter._accepts_documents(None, paths))
 
     def test_attachment_chips_alone_do_not_finish_transfer(self):
         with tempfile.TemporaryDirectory() as directory:
             adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
-            file_input = SimpleNamespace(set_input_files=AsyncMock())
-            inputs = SimpleNamespace(count=AsyncMock(return_value=1), first=file_input)
-            adapter.page = SimpleNamespace(locator=Mock(return_value=inputs))
+            file_input = SimpleNamespace(set_input_files=AsyncMock(), get_attribute=AsyncMock(return_value=""))
             item = SimpleNamespace(attachments=SimpleNamespace(paths=(Path("first.pdf"), Path("second.pdf"))))
             busy = {"chip_count": 2, "matched_count": 2, "active": True, "upload_error": False, "send_enabled": True}
             ready = {**busy, "active": False}
-            with patch.object(adapter, "_attachment_state", new=AsyncMock(side_effect=[busy, ready])) as snapshot, patch(
+            with patch.object(adapter, "_ensure_attachment_input", new=AsyncMock(return_value=file_input)), patch.object(
+                adapter, "_attachment_state", new=AsyncMock(side_effect=[busy, ready])
+            ) as snapshot, patch(
                 "justify_ip_change_copilot_chat_ui.copilot_ui.TRANSFER_QUIET_SECONDS", 0
             ), patch("justify_ip_change_copilot_chat_ui.copilot_ui.asyncio.sleep", new=AsyncMock()):
                 asyncio.run(adapter._attach(item))
             self.assertEqual(snapshot.await_count, 2)
             self.assertEqual(file_input.set_input_files.await_args.kwargs["timeout"], 900_000)
+
+    def test_single_file_picker_assigns_each_document_after_chip_confirmation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
+            file_input = SimpleNamespace(set_input_files=AsyncMock(), get_attribute=AsyncMock(return_value=None))
+            item = SimpleNamespace(attachments=SimpleNamespace(paths=(Path("first.pdf"), Path("second.md"))))
+            ready = {"chip_count": 2, "matched_count": 2, "active": False,
+                     "upload_error": False, "send_enabled": True}
+            with patch.object(adapter, "_ensure_attachment_input", new=AsyncMock(return_value=file_input)), patch.object(
+                adapter, "_wait_for_attachment_chips", new=AsyncMock()
+            ) as chips, patch.object(adapter, "_attachment_state", new=AsyncMock(return_value=ready)), patch(
+                "justify_ip_change_copilot_chat_ui.copilot_ui.TRANSFER_QUIET_SECONDS", 0
+            ), patch("justify_ip_change_copilot_chat_ui.copilot_ui.asyncio.sleep", new=AsyncMock()):
+                asyncio.run(adapter._attach(item))
+            self.assertEqual(file_input.set_input_files.await_count, 2)
+            self.assertEqual(file_input.set_input_files.await_args_list[0].args[0], ["first.pdf"])
+            self.assertEqual(file_input.set_input_files.await_args_list[1].args[0], ["second.md"])
+            self.assertEqual(chips.await_count, 2)
+            self.assertEqual(adapter.case_diagnostics["attachment_assignment_mode"], "sequential")
 
     def test_prompt_is_filled_before_upload_and_no_send_occurs_on_upload_failure(self):
         with tempfile.TemporaryDirectory() as directory:
