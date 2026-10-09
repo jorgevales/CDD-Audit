@@ -34,7 +34,9 @@ def get_cdp_version(endpoint: str, timeout: float = 0.75) -> dict | None:
     parsed_ws = urlparse(websocket)
     if parsed_ws.scheme != "ws" or parsed_ws.hostname not in {"127.0.0.1", "localhost"} or parsed_ws.port != parsed.port:
         raise CopilotUIError("Edge advertised a debugging address outside the requested loopback port.")
-    if "edge" not in browser.casefold():
+    # Edge identifies itself as Edg/<version> in /json/version. The previous
+    # "edge" check rejected every valid Edge response and exhausted all retries.
+    if "edg/" not in browser.casefold():
         raise CopilotUIError("The debugging endpoint does not advertise Microsoft Edge.")
     return payload
 
@@ -57,8 +59,13 @@ def find_edge(explicit: Path | None = None) -> Path:
 
 
 def _profile_argument(command_line: str) -> Path | None:
-    match = re.search(r'--user-data-dir(?:=|\s+)(?:"([^"]+)"|(\S+))', command_line, re.IGNORECASE)
-    return Path(match.group(1) or match.group(2)) if match else None
+    # Windows quotes the entire argument when the profile path contains spaces.
+    match = re.search(
+        r'"--user-data-dir=([^"]+)"|--user-data-dir(?:=|\s+)(?:"([^"]+)"|(\S+))',
+        command_line,
+        re.IGNORECASE,
+    )
+    return Path(next(value for value in match.groups() if value)) if match else None
 
 
 def validate_existing_profile(port: int, profile: Path) -> None:

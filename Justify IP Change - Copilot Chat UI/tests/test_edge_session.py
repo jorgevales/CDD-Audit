@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -13,10 +14,48 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from justify_ip_change_copilot_chat_ui.edge_session import EdgeSession
+from justify_ip_change_copilot_chat_ui.edge_session import EdgeSession, _profile_argument, get_cdp_version
+from justify_ip_change_copilot_chat_ui.errors import CopilotUIError
 
 
 class EdgeSessionTests(unittest.TestCase):
+    def test_windows_quoted_profile_argument_with_spaces(self):
+        profile = Path(r"C:\Users\Example Person\AppData\Local\CDD Audit\EdgeProfile")
+        self.assertEqual(_profile_argument(f'msedge.exe "--user-data-dir={profile}"'), profile)
+        self.assertEqual(_profile_argument(f'msedge.exe --user-data-dir="{profile}"'), profile)
+
+    def test_real_edge_cdp_identity_is_accepted(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self, *_):
+                return json.dumps({
+                    "Browser": "Edg/132.0.2957.127",
+                    "webSocketDebuggerUrl": "ws://127.0.0.1:9445/devtools/browser/test",
+                }).encode("utf-8")
+
+        with patch("justify_ip_change_copilot_chat_ui.edge_session.urllib.request.OpenerDirector.open", return_value=Response()):
+            self.assertEqual(get_cdp_version("http://127.0.0.1:9445")["Browser"], "Edg/132.0.2957.127")
+
+    def test_non_edge_cdp_identity_is_rejected(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self, *_):
+                return b'{"Browser":"Chrome/132.0","webSocketDebuggerUrl":"ws://127.0.0.1:9445/devtools/browser/test"}'
+
+        with patch("justify_ip_change_copilot_chat_ui.edge_session.urllib.request.OpenerDirector.open", return_value=Response()):
+            with self.assertRaisesRegex(CopilotUIError, "does not advertise Microsoft Edge"):
+                get_cdp_version("http://127.0.0.1:9445")
+
     def test_launch_uses_detached_machine_safe_edge_options(self):
         with tempfile.TemporaryDirectory() as directory:
             session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
