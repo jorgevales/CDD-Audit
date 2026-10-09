@@ -58,6 +58,22 @@ def find_edge(explicit: Path | None = None) -> Path:
     raise FileNotFoundError("Microsoft Edge was not found. Use --edge-path with the approved msedge.exe path.")
 
 
+def remote_debugging_blocked() -> bool:
+    if os.name != "nt":
+        return False
+    import winreg
+
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(hive, r"SOFTWARE\Policies\Microsoft\Edge") as key:
+                value, _ = winreg.QueryValueEx(key, "RemoteDebuggingAllowed")
+                if value == 0:
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def _profile_argument(command_line: str) -> Path | None:
     # Windows quotes the entire argument when the profile path contains spaces.
     match = re.search(
@@ -102,6 +118,7 @@ class EdgeSession:
         self.edge_path = edge_path
         self.endpoint = cdp_endpoint(port)
         self.process: subprocess.Popen | None = None
+        self.last_failure = ""
 
     @staticmethod
     def _free_port(preferred: int, excluded: set[int]) -> int:
@@ -178,7 +195,12 @@ class EdgeSession:
         self.profile = profile.expanduser().resolve()
         self.port = port
         self.endpoint = cdp_endpoint(port)
-        if self._profile_in_use(self.profile) or self._port_in_use(port):
+        if self._profile_in_use(self.profile):
+            self.last_failure = "dedicated profile already in use"
+            self._stop_failed_process()
+            return False
+        if self._port_in_use(port):
+            self.last_failure = "requested local port already in use"
             self._stop_failed_process()
             return False
         self.profile.mkdir(parents=True, exist_ok=True)
@@ -203,10 +225,12 @@ class EdgeSession:
             raise CopilotUIError("Microsoft Edge could not be started. Check the Edge installation and local execution policy.") from exc
         deadline = time.monotonic() + timeout
         launched_process_exited = False
+        endpoint_rejected = False
         while time.monotonic() < deadline:
             try:
                 payload = get_cdp_version(self.endpoint, timeout=0.25)
             except CopilotUIError:
+                endpoint_rejected = True
                 payload = None
             if payload:
                 return True
@@ -215,12 +239,19 @@ class EdgeSession:
                 # keep the full bounded handshake window for that child.
                 launched_process_exited = True
             time.sleep(0.10 if not launched_process_exited else 0.15)
+        self.last_failure = (
+            "local endpoint rejected its Edge identity or address" if endpoint_rejected
+            else "Edge process exited without a local debugging endpoint" if launched_process_exited
+            else "Edge did not open a local debugging endpoint within the attempt limit"
+        )
         self._stop_failed_process()
         return False
 
     def ensure_started(self, timeout: float = 90.0) -> None:
         started_at = time.monotonic()
         attempted_ports: set[int] = set()
+        if remote_debugging_blocked():
+            raise CopilotUIError("Microsoft Edge policy disables remote debugging. Ask IT to enable it for this application.")
         try:
             payload = get_cdp_version(self.endpoint)
             if payload:
@@ -230,25 +261,25 @@ class EdgeSession:
         except CopilotUIError:
             pass
 
-        edge_timeout = max(5.0, timeout / 3.0)
         requested_profile = self.profile
         methods = (
-            ("dedicated profile and requested port", requested_profile, self.port),
-            ("dedicated profile and alternate port", requested_profile, None),
-            ("fresh run profile and alternate port", requested_profile.parent / (requested_profile.name + "-run-" + os.urandom(4).hex()), None),
+            ("dedicated profile and requested port", requested_profile, self.port, 12.0),
+            ("dedicated profile and alternate port", requested_profile, None, 8.0),
+            ("fresh run profile and alternate port", requested_profile.parent / (requested_profile.name + "-run-" + os.urandom(4).hex()), None, 30.0),
         )
-        for method, profile, requested_port in methods:
+        failures = []
+        for method, profile, requested_port, budget in methods:
             if time.monotonic() - started_at >= timeout:
                 break
             port = requested_port if requested_port is not None else self._free_port(self.port, attempted_ports)
             attempted_ports.add(port)
-            remaining = max(5.0, min(edge_timeout, timeout - (time.monotonic() - started_at)))
+            remaining = max(0.1, min(budget, timeout - (time.monotonic() - started_at)))
             if self._launch_attempt(profile, port, remaining):
                 print(f"\033[92mEdge startup method: {method}\033[0m")
                 return
+            failures.append(f"{method}: {self.last_failure or 'endpoint unavailable'}")
         raise CopilotUIError(
-            "Edge did not expose its local debugging endpoint after three bounded startup methods "
-            "(existing endpoint, alternate port, and fresh profile)."
+            "Edge did not expose its local debugging endpoint. " + "; ".join(failures)
         )
 
     def close_owned(self) -> None:

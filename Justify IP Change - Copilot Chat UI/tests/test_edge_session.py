@@ -97,7 +97,18 @@ class EdgeSessionTests(unittest.TestCase):
             with patch.object(session, "_launch_attempt", side_effect=[False, True]) as launch, contextlib.redirect_stdout(output):
                 session.ensure_started(timeout=90)
             self.assertEqual(launch.call_count, 2)
+            self.assertLessEqual(launch.call_args_list[0].args[2], 12)
             self.assertIn("Edge startup method: dedicated profile and alternate port", output.getvalue())
+
+    def test_explicit_edge_policy_block_stops_before_launch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
+            with patch("justify_ip_change_copilot_chat_ui.edge_session.remote_debugging_blocked", return_value=True), patch.object(
+                session, "_launch_attempt"
+            ) as launch:
+                with self.assertRaisesRegex(CopilotUIError, "policy disables remote debugging"):
+                    session.ensure_started(timeout=15)
+            launch.assert_not_called()
 
     def test_existing_validated_endpoint_reports_method(self):
         with tempfile.TemporaryDirectory() as directory:
