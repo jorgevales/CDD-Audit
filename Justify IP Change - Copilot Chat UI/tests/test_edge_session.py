@@ -20,10 +20,24 @@ if str(SRC) not in sys.path:
 from justify_ip_change_copilot_chat_ui.edge_session import EdgeSession, _profile_argument, get_cdp_version
 from justify_ip_change_copilot_chat_ui.errors import CopilotUIError
 from justify_ip_change_copilot_chat_ui.profile_storage import default_edge_profile
-from justify_ip_change_copilot_chat_ui.copilot_ui import PlaywrightCopilotAdapter
+from justify_ip_change_copilot_chat_ui.copilot_ui import (
+    ATTACH_BUTTON_SELECTORS, EDITOR_SELECTORS, SEND_SELECTORS, PlaywrightCopilotAdapter,
+)
 
 
 class EdgeSessionTests(unittest.TestCase):
+    def test_working_agent_editor_attachment_and_send_variants_are_available(self):
+        self.assertIn("#m365-chat-editor-target-element", EDITOR_SELECTORS)
+        self.assertIn("button[data-testid='chat-input-attach-button']", ATTACH_BUTTON_SELECTORS)
+        self.assertIn("button[type='submit'][aria-label*='send' i]:not([aria-label*='stop' i])", SEND_SELECTORS)
+
+    def test_microsoft_login_frame_is_classified_without_recording_its_url(self):
+        page = SimpleNamespace(
+            url="https://m365.cloud.microsoft/chat",
+            frames=[SimpleNamespace(url="https://m365.cloud.microsoft/chat"), SimpleNamespace(url="https://login.microsoftonline.com/common")],
+        )
+        self.assertEqual(PlaywrightCopilotAdapter._page_category(page), "login")
+
     def test_default_profile_uses_personal_onedrive_storage(self):
         with tempfile.TemporaryDirectory() as directory:
             with patch.dict(os.environ, {"OneDriveCommercial": directory}):
@@ -127,12 +141,21 @@ class EdgeSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
             adapter = PlaywrightCopilotAdapter(session)
-            class Manager:
-                async def stop(self):
-                    return None
-            adapter.manager = Manager()
+            adapter.manager = SimpleNamespace(stop=AsyncMock())
+            adapter.playwright = SimpleNamespace(stop=AsyncMock())
+            adapter.browser = SimpleNamespace(close=AsyncMock())
+            adapter.page = SimpleNamespace(close=AsyncMock())
+            manager = adapter.manager
+            playwright = adapter.playwright
+            browser = adapter.browser
+            page = adapter.page
             with patch.object(session, "close_owned") as retain:
                 asyncio.run(adapter.close())
+            playwright.stop.assert_awaited_once_with()
+            manager.stop.assert_not_awaited()
+            browser.close.assert_not_awaited()
+            page.close.assert_not_awaited()
+            self.assertIsNone(adapter.playwright)
             retain.assert_called_once_with()
 
     def test_unselected_model_does_not_delay_ready_composer(self):
@@ -141,22 +164,185 @@ class EdgeSessionTests(unittest.TestCase):
         self.assertFalse(ready(True, None, True))
         self.assertTrue(ready(True, True, True))
 
-    def test_connected_edge_reuses_tab_and_immediately_starts_without_model_picker(self):
+    def test_ready_retained_tab_starts_queue_without_navigation_or_send(self):
         with tempfile.TemporaryDirectory() as directory:
             session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
             adapter = PlaywrightCopilotAdapter(session)
-            page = SimpleNamespace(url="https://m365.cloud.microsoft/chat", bring_to_front=AsyncMock())
+            page = SimpleNamespace(
+                url="https://m365.cloud.microsoft/chat",
+                bring_to_front=AsyncMock(), goto=AsyncMock(), reload=AsyncMock(),
+                is_closed=lambda: False,
+            )
             context = SimpleNamespace(pages=[page], new_page=AsyncMock())
             adapter.browser = SimpleNamespace(contexts=[context])
+            output = io.StringIO()
             with patch("justify_ip_change_copilot_chat_ui.copilot_ui.validate_existing_profile"), patch.object(
-                adapter, "_first_visible", new=AsyncMock(return_value=object())
-            ) as visible:
+                adapter, "_wait_for_ready", new=AsyncMock(return_value=True), create=True
+            ) as ready, patch.object(adapter, "process", new=AsyncMock()) as process, contextlib.redirect_stdout(output):
                 asyncio.run(adapter._activate_copilot())
             context.new_page.assert_not_awaited()
+            page.goto.assert_not_awaited()
+            page.reload.assert_not_awaited()
             page.bring_to_front.assert_awaited_once()
-            visible.assert_awaited_once()
+            ready.assert_awaited_once()
+            process.assert_not_awaited()
             self.assertEqual(adapter.startup_diagnostics["phase"], "ready")
             self.assertTrue(adapter.startup_diagnostics["tab_reused"])
+            self.assertIn("\033[92m", output.getvalue())
+            self.assertIn("retained tab", output.getvalue())
+            self.assertEqual(output.getvalue().count("retained tab"), 1)
+
+    def test_unready_retained_tab_opens_one_new_tab_without_touching_old_tab(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
+            adapter = PlaywrightCopilotAdapter(session)
+            old = SimpleNamespace(
+                url="https://m365.cloud.microsoft/chat",
+                bring_to_front=AsyncMock(), goto=AsyncMock(), reload=AsyncMock(),
+                is_closed=lambda: False,
+            )
+            new = SimpleNamespace(
+                url="about:blank", bring_to_front=AsyncMock(), goto=AsyncMock(),
+                reload=AsyncMock(), is_closed=lambda: False,
+            )
+            context = SimpleNamespace(pages=[old], new_page=AsyncMock(return_value=new))
+            adapter.browser = SimpleNamespace(contexts=[context])
+            output = io.StringIO()
+            with patch("justify_ip_change_copilot_chat_ui.copilot_ui.validate_existing_profile"), patch.object(
+                adapter, "_wait_for_ready", new=AsyncMock(side_effect=[False, True]), create=True
+            ) as ready, contextlib.redirect_stdout(output):
+                asyncio.run(adapter._activate_copilot())
+            self.assertEqual(ready.await_count, 2)
+            context.new_page.assert_awaited_once()
+            old.goto.assert_not_awaited()
+            old.reload.assert_not_awaited()
+            new.goto.assert_awaited_once()
+            new.reload.assert_not_awaited()
+            self.assertIs(adapter.page, new)
+            self.assertIn("\033[92m", output.getvalue())
+            self.assertIn("new tab", output.getvalue())
+            self.assertEqual(output.getvalue().count("new tab"), 1)
+
+    def test_no_retained_tab_starts_in_one_new_tab(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
+            adapter = PlaywrightCopilotAdapter(session)
+            new = SimpleNamespace(
+                url="about:blank", bring_to_front=AsyncMock(), goto=AsyncMock(),
+                reload=AsyncMock(), is_closed=lambda: False,
+            )
+            context = SimpleNamespace(pages=[], new_page=AsyncMock(return_value=new))
+            adapter.browser = SimpleNamespace(contexts=[context])
+            output = io.StringIO()
+            with patch("justify_ip_change_copilot_chat_ui.copilot_ui.validate_existing_profile"), patch.object(
+                adapter, "_wait_for_ready", new=AsyncMock(return_value=True), create=True
+            ) as ready, contextlib.redirect_stdout(output):
+                asyncio.run(adapter._activate_copilot())
+            ready.assert_awaited_once()
+            context.new_page.assert_awaited_once()
+            new.goto.assert_awaited_once()
+            new.reload.assert_not_awaited()
+            self.assertIs(adapter.page, new)
+            self.assertIn("\033[92m", output.getvalue())
+            self.assertIn("new tab", output.getvalue())
+            self.assertEqual(output.getvalue().count("new tab"), 1)
+
+    def test_new_tab_navigation_retry_is_bounded_and_does_not_touch_retained_tab(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
+            adapter = PlaywrightCopilotAdapter(session)
+            old = SimpleNamespace(
+                url="https://m365.cloud.microsoft/chat",
+                bring_to_front=AsyncMock(), goto=AsyncMock(), reload=AsyncMock(),
+                is_closed=lambda: False,
+            )
+            new = SimpleNamespace(
+                url="https://m365.cloud.microsoft/chat",
+                bring_to_front=AsyncMock(), goto=AsyncMock(), reload=AsyncMock(),
+                is_closed=lambda: False,
+            )
+            context = SimpleNamespace(pages=[old], new_page=AsyncMock(return_value=new))
+            adapter.browser = SimpleNamespace(contexts=[context])
+            output = io.StringIO()
+            with patch("justify_ip_change_copilot_chat_ui.copilot_ui.validate_existing_profile"), patch.object(
+                adapter, "_wait_for_ready", new=AsyncMock(side_effect=[False, False, True]), create=True
+            ) as ready, contextlib.redirect_stdout(output):
+                asyncio.run(adapter._activate_copilot())
+            self.assertEqual(ready.await_count, 3)
+            context.new_page.assert_awaited_once()
+            old.goto.assert_not_awaited()
+            old.reload.assert_not_awaited()
+            self.assertEqual(new.goto.await_count, 2)
+            self.assertIs(adapter.page, new)
+            self.assertIn("\033[92m", output.getvalue())
+            self.assertIn("new tab navigation retry", output.getvalue())
+            self.assertEqual(output.getvalue().count("new tab navigation retry"), 1)
+
+    def test_sign_in_waits_in_new_tab_without_navigation_retry_or_send(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
+            adapter = PlaywrightCopilotAdapter(session, startup_timeout=37)
+            old = SimpleNamespace(
+                url="https://m365.cloud.microsoft/chat",
+                bring_to_front=AsyncMock(), goto=AsyncMock(), reload=AsyncMock(),
+                is_closed=lambda: False,
+            )
+            new = SimpleNamespace(
+                url="https://login.microsoftonline.com/example",
+                bring_to_front=AsyncMock(), goto=AsyncMock(), reload=AsyncMock(),
+                is_closed=lambda: False,
+            )
+            context = SimpleNamespace(pages=[old], new_page=AsyncMock(return_value=new))
+            adapter.browser = SimpleNamespace(contexts=[context])
+            output = io.StringIO()
+            with patch("justify_ip_change_copilot_chat_ui.copilot_ui.validate_existing_profile"), patch.object(
+                adapter, "_wait_for_ready", new=AsyncMock(side_effect=[False, False, True]), create=True
+            ) as ready, patch.object(adapter, "process", new=AsyncMock()) as process, contextlib.redirect_stdout(output):
+                asyncio.run(adapter._activate_copilot())
+            self.assertEqual(ready.await_count, 3)
+            self.assertEqual(ready.await_args_list[-1].args[1], 37)
+            context.new_page.assert_awaited_once()
+            old.goto.assert_not_awaited()
+            old.reload.assert_not_awaited()
+            new.goto.assert_awaited_once()
+            new.reload.assert_not_awaited()
+            process.assert_not_awaited()
+            self.assertEqual(adapter.startup_diagnostics["phase"], "ready")
+            self.assertIn("\033[92m", output.getvalue())
+            self.assertIn("sign-in completed", output.getvalue())
+            self.assertEqual(output.getvalue().count("sign-in completed"), 1)
+
+    def test_unready_copilot_fails_before_send_after_bounded_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
+            adapter = PlaywrightCopilotAdapter(session)
+            old = SimpleNamespace(
+                url="https://m365.cloud.microsoft/chat",
+                bring_to_front=AsyncMock(), goto=AsyncMock(), reload=AsyncMock(),
+                is_closed=lambda: False,
+            )
+            new = SimpleNamespace(
+                url="https://m365.cloud.microsoft/chat",
+                bring_to_front=AsyncMock(), goto=AsyncMock(), reload=AsyncMock(),
+                is_closed=lambda: False,
+            )
+            context = SimpleNamespace(pages=[old], new_page=AsyncMock(return_value=new))
+            adapter.browser = SimpleNamespace(contexts=[context])
+            output = io.StringIO()
+            with patch("justify_ip_change_copilot_chat_ui.copilot_ui.validate_existing_profile"), patch.object(
+                adapter, "_wait_for_ready", new=AsyncMock(side_effect=[False, False, False]), create=True
+            ) as ready, patch.object(
+                adapter, "_capture_readiness_state", new=AsyncMock(), create=True
+            ) as snapshot, patch.object(adapter, "process", new=AsyncMock()) as process, contextlib.redirect_stdout(output):
+                with self.assertRaisesRegex(CopilotUIError, "No case was sent"):
+                    asyncio.run(adapter._activate_copilot())
+            self.assertEqual(ready.await_count, 3)
+            snapshot.assert_awaited_once()
+            self.assertEqual(new.goto.await_count, 2)
+            old.goto.assert_not_awaited()
+            old.reload.assert_not_awaited()
+            process.assert_not_awaited()
+            self.assertNotIn("\033[92mCopilot readiness method:", output.getvalue())
 
     def test_explicit_edge_policy_block_stops_before_launch(self):
         with tempfile.TemporaryDirectory() as directory:

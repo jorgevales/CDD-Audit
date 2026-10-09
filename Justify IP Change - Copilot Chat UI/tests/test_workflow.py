@@ -167,6 +167,8 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn("frames", payload)
         self.assertIn("error_ref", payload)
         self.assertNotIn("traceback", payload)
+        other = write_error_report(workspace, RuntimeError("different private exception text"), stage="edge_startup")
+        self.assertEqual(payload["error_ref"], json.loads(other.read_text(encoding="utf-8"))["error_ref"])
 
     def test_error_report_keeps_safe_stage_details_and_discards_raw_values(self):
         workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
@@ -178,7 +180,61 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(payload["stage"], "copilot_startup")
         self.assertEqual(payload["diagnostics"]["copilot"]["phase"], "copilot_readiness")
         self.assertEqual(payload["diagnostics"]["copilot"]["cdp_connect_attempts"], 2)
-        self.assertEqual(payload["diagnostics"]["copilot"]["raw"], "<redacted>")
+        self.assertNotIn("raw", payload["diagnostics"]["copilot"])
+        self.assertNotIn("Jane Doe", path.read_text(encoding="utf-8"))
+
+    def test_error_report_retains_bounded_readiness_evidence_without_page_content(self):
+        workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
+        private = r"C:\Users\Jane Doe\private\case 12345.txt"
+        error = RuntimeError(f"Copilot page contained {private}")
+        error.diagnostic_stage = "copilot_startup"
+        error.diagnostics = {
+            "copilot": {
+                "phase": "copilot_readiness",
+                "readiness_method": "new_tab_navigation_retry",
+                "readiness_attempts": [
+                    {"method": "retained_tab", "result": "not_ready", "elapsed_ms": 1200},
+                    {"method": "new_tab_navigation_retry", "result": "composer_visible", "elapsed_ms": 350},
+                    {"method": private, "result": "not_ready", "elapsed_ms": 1},
+                ] + [{"method": private} for _ in range(20)],
+                "readiness_elapsed_ms": 1550,
+                "readiness_checks": 7,
+                "page_category": "login",
+                "document_state": "interactive",
+                "editor_selector_counts": {
+                    "primary_editor": 0,
+                    "testid_editor": 1,
+                    "role_textbox": 0,
+                    "message_textarea": 0,
+                    "private_selector": private,
+                },
+                "frame_count": 1,
+                "editor_in_frame": False,
+                "login_indicator": True,
+                "access_denied_indicator": False,
+                "navigation_outcome": "auth",
+                "last_navigation_error_type": "TimeoutError",
+                "last_readiness_error_type": "TargetClosedError",
+                "url": "https://m365.cloud.microsoft/chat?account=Jane Doe",
+                "page_text": private,
+            },
+            "private_key": private,
+        }
+        path = write_error_report(workspace, error, stage="cli_failure")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        copilot = payload["diagnostics"]["copilot"]
+        self.assertEqual(copilot["readiness_method"], "new_tab_navigation_retry")
+        self.assertEqual(copilot["editor_selector_counts"]["testid_editor"], 1)
+        self.assertEqual(copilot["navigation_outcome"], "auth")
+        self.assertEqual(copilot["last_navigation_error_type"], "TimeoutError")
+        self.assertEqual(copilot["last_readiness_error_type"], "TargetClosedError")
+        self.assertEqual(copilot["readiness_attempts"][0]["result"], "not_ready")
+        self.assertEqual(copilot["readiness_attempts"][2]["method"], "<redacted>")
+        self.assertEqual(len(copilot["readiness_attempts"]), 12)
+        self.assertNotIn("private_selector", copilot["editor_selector_counts"])
+        self.assertNotIn("url", copilot)
+        self.assertNotIn("page_text", copilot)
+        self.assertNotIn("private_key", payload["diagnostics"])
         self.assertNotIn("Jane Doe", path.read_text(encoding="utf-8"))
 
     def test_unexpected_startup_failure_still_creates_complete_report(self):
