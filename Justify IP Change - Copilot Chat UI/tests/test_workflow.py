@@ -1,0 +1,421 @@
+from __future__ import annotations
+
+import asyncio
+import csv
+import contextlib
+import io
+import os
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from openpyxl import Workbook
+
+from justify_ip_change_copilot_chat_ui.application import execute_queue
+from justify_ip_change_copilot_chat_ui.attachments import build_attachment_plan, merged_pdf_parts
+from justify_ip_change_copilot_chat_ui.batch_discovery import completed_output_file, discover_batches
+from justify_ip_change_copilot_chat_ui.case_discovery import discover_case_folders, match_batch_cases
+from justify_ip_change_copilot_chat_ui.copilot_ui import CaseOutcome, SimulationAdapter
+from justify_ip_change_copilot_chat_ui.cli import parse_args, run_cli
+from justify_ip_change_copilot_chat_ui.errors import BatchLockedError, ResourceError, WorkspaceError
+from justify_ip_change_copilot_chat_ui.errors import PostSendCancelledError
+from justify_ip_change_copilot_chat_ui.identity import windows_account_name
+from justify_ip_change_copilot_chat_ui.logs import BatchLockSet, CaseLog, LOG_FILENAME
+from justify_ip_change_copilot_chat_ui.models import CaseRecord
+from justify_ip_change_copilot_chat_ui.paths import LocalSimulationResolver, normalise_windows_path_text, strip_extended_prefix
+from justify_ip_change_copilot_chat_ui.queue_builder import build_preflight
+from justify_ip_change_copilot_chat_ui.resources import REQUIRED_CASE_COLUMNS, load_case_workbook
+from justify_ip_change_copilot_chat_ui.workspace import validate_runtime_resources, validate_workspace
+
+
+def row_for(change_id: int, party_id: int) -> dict[str, str]:
+    row = {name: f"synthetic-{name}" for name in REQUIRED_CASE_COLUMNS}
+    row["change_id"] = f"{change_id:05d}"
+    row["InterestedPartyId"] = str(party_id)
+    row["ChangedFields"] = "[SyntheticField]"
+    row["PreviousValues"] = "SyntheticField: before"
+    row["NewValues"] = "SyntheticField: after"
+    row["FieldChangeCount"] = "1"
+    return row
+
+
+class Fixture:
+    def __init__(self, root: Path, counts=(3, 2)) -> None:
+        self.root = root / "source elsewhere" / "deep" / "shared data"
+        self.root.mkdir(parents=True)
+        self.working = self.root / "Working Space"
+        self.resources = self.working / "Copilot resources"
+        self.users = self.working / "Users"
+        self.merged = self.resources / "Temporary merged pdfs"
+        self.merged.mkdir(parents=True)
+        self.users.mkdir(parents=True)
+        (self.resources / "IP_Review_LLM_Instructions.md").write_text("Synthetic instructions", encoding="utf-8")
+        (self.resources / "base_message.md").write_text("Synthetic base message", encoding="utf-8")
+        self.rows = []
+        next_id = 1
+        self.batches = []
+        for count in counts:
+            low = next_id
+            high = next_id + 99
+            batch = self.root / f"Batch_{low:05d}_to_{high:05d}"
+            batch.mkdir()
+            self.batches.append(batch)
+            for offset in range(count):
+                row = row_for(next_id + offset, 700000 + next_id + offset)
+                self.rows.append(row)
+                folder_name = f"Change_{row['change_id']}_Interested_Party_{row['InterestedPartyId']}"
+                case = batch / folder_name
+                case.mkdir()
+                (case / f"synthetic_{row['change_id']}.txt").write_text("fictional content", encoding="utf-8")
+                (self.merged / f"{folder_name}_part_1.pdf").write_bytes(b"%PDF-1.4 synthetic")
+            next_id += 100
+        self.write_workbook(self.rows)
+
+    def write_workbook(self, rows) -> None:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Synthetic cases"
+        sheet.append(list(REQUIRED_CASE_COLUMNS))
+        for row in rows:
+            sheet.append([row.get(name, "") for name in REQUIRED_CASE_COLUMNS])
+        workbook.save(self.resources / "07_Interested_Parties_Changes_15576.xlsx")
+        workbook.close()
+
+
+class WorkspaceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.fixture = Fixture(Path(self.temp.name))
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_deep_path_with_spaces_validates_and_derives(self):
+        workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
+        self.assertTrue(os.path.samefile(workspace.data_root, self.fixture.root))
+        self.assertTrue(os.path.samefile(workspace.users, self.fixture.users))
+        self.assertTrue(os.path.samefile(workspace.merged_pdfs, self.fixture.merged))
+
+    def test_wrong_final_folder_rejected(self):
+        with self.assertRaisesRegex(WorkspaceError, "Copilot resources"):
+            validate_workspace(self.fixture.working, LocalSimulationResolver(Path(self.temp.name)))
+
+    def test_missing_users_rejected(self):
+        self.fixture.users.rmdir()
+        with self.assertRaisesRegex(WorkspaceError, "Users"):
+            validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
+
+    def test_all_missing_resources_reported_together(self):
+        workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
+        (self.fixture.resources / "base_message.md").unlink()
+        (self.fixture.resources / "IP_Review_LLM_Instructions.md").unlink()
+        with self.assertRaises(ResourceError) as caught:
+            validate_runtime_resources(workspace)
+        self.assertIn("base_message.md", str(caught.exception))
+        self.assertIn("IP_Review_LLM_Instructions.md", str(caught.exception))
+
+    def test_windows_normalisation_and_extended_unc(self):
+        self.assertEqual(normalise_windows_path_text(r'S:/A/B'), r"S:\A\B")
+        self.assertEqual(strip_extended_prefix(r"\\?\UNC\server\share\folder"), r"\\server\share\folder")
+
+    def test_windows_account_name_is_sanitised(self):
+        with patch("getpass.getuser", return_value=r"DOMAIN\synthetic.user"):
+            self.assertEqual(windows_account_name(), "synthetic.user")
+
+
+class BatchTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.fixture = Fixture(Path(self.temp.name))
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_numeric_batch_order_and_unrelated_folder_ignored(self):
+        (self.fixture.root / "Batch_1001_to_1100").mkdir()
+        (self.fixture.root / "Batch_201_to_300").mkdir()
+        (self.fixture.root / "Not_A_Batch").mkdir()
+        ranges = [(item.range_from, item.range_to) for item in discover_batches(self.fixture.root)]
+        self.assertEqual(ranges, [(1, 100), (101, 200), (201, 300), (1001, 1100)])
+
+    def test_direct_ips_excel_completes_batch_case_insensitive(self):
+        marker = self.fixture.batches[0] / "iPs_Completed_Analysis.XLSX"
+        marker.write_bytes(b"synthetic")
+        self.assertEqual(completed_output_file(self.fixture.batches[0]), marker)
+
+    def test_nested_ips_excel_does_not_complete_batch(self):
+        case = next(item for item in self.fixture.batches[0].iterdir() if item.is_dir())
+        (case / "IPs_case_input.xlsx").write_bytes(b"synthetic")
+        self.assertIsNone(completed_output_file(self.fixture.batches[0]))
+
+    def test_temporary_excel_lock_file_ignored(self):
+        (self.fixture.batches[0] / "~$IPs_output.xlsx").write_bytes(b"synthetic")
+        self.assertIsNone(completed_output_file(self.fixture.batches[0]))
+
+    def test_final_batch_fewer_than_100_is_valid(self):
+        records = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")
+        selected = [row for row in records if 101 <= int(row.change_id) <= 200]
+        self.assertEqual(len(selected), 2)
+
+    def test_case_folder_without_workbook_row_is_blocked(self):
+        folder = self.fixture.batches[0] / "Change_00099_Interested_Party_799999"
+        folder.mkdir()
+        records = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")
+        matched, blocked = match_batch_cases(discover_batches(self.fixture.root)[0], records)
+        self.assertEqual(len(matched), 3)
+        self.assertTrue(any("no matching runtime workbook row" in message for message in blocked))
+
+    def test_out_of_range_case_folder_is_blocked(self):
+        folder = self.fixture.batches[0] / "Change_00101_Interested_Party_700101"
+        folder.mkdir()
+        records = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")
+        _, blocked = match_batch_cases(discover_batches(self.fixture.root)[0], records)
+        self.assertTrue(any("outside the batch" in message for message in blocked))
+
+    def test_canonical_duplicate_case_folders_are_rejected(self):
+        existing = next(item for item in self.fixture.batches[0].iterdir() if item.is_dir())
+        duplicate = self.fixture.batches[0] / existing.name.replace("Change_00001_", "Change_1_")
+        duplicate.mkdir()
+        with self.assertRaisesRegex(ResourceError, "duplicate case folders"):
+            discover_case_folders(discover_batches(self.fixture.root)[0])
+
+
+class AttachmentAndWorkbookTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.fixture = Fixture(Path(self.temp.name), counts=(1,))
+        self.record = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")[0]
+        self.folder = self.fixture.batches[0] / self.record.folder_name
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_valid_part_sequence_and_plan(self):
+        plan = build_attachment_plan(
+            self.record,
+            self.folder,
+            self.fixture.merged,
+            self.fixture.resources / "IP_Review_LLM_Instructions.md",
+        )
+        self.assertEqual(plan.merged_pdf_names, (self.record.folder_name + "_part_1.pdf",))
+        self.assertEqual(len(plan.paths), 3)
+
+    def test_missing_part_is_blocked(self):
+        part1 = self.fixture.merged / (self.record.folder_name + "_part_1.pdf")
+        part1.rename(self.fixture.merged / (self.record.folder_name + "_part_2.pdf"))
+        with self.assertRaisesRegex(ResourceError, "continuous"):
+            merged_pdf_parts(self.record, self.fixture.merged)
+
+    def test_ambiguous_part_is_blocked_case_insensitively(self):
+        duplicate = self.fixture.merged / (self.record.folder_name + "_part_01.pdf")
+        duplicate.write_bytes(b"%PDF duplicate")
+        with self.assertRaisesRegex(ResourceError, "Ambiguous"):
+            merged_pdf_parts(self.record, self.fixture.merged)
+
+    def test_duplicate_workbook_case_rejected(self):
+        self.fixture.write_workbook([self.fixture.rows[0], self.fixture.rows[0]])
+        with self.assertRaisesRegex(ResourceError, "duplicate"):
+            load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")
+
+
+class QueueLogAndLockTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.fixture = Fixture(Path(self.temp.name))
+        self.workspace = validate_workspace(self.fixture.resources, LocalSimulationResolver(Path(self.temp.name)))
+        self.records = load_case_workbook(self.fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")
+        self.batches = discover_batches(self.fixture.root)
+        self.log_path = self.fixture.users / "synthetic.user" / LOG_FILENAME
+        self.log = CaseLog(self.log_path, "synthetic.user")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def preflight(self, batches=None, retry_review=False):
+        return build_preflight(
+            batches or self.batches,
+            self.records,
+            self.log.latest(),
+            merged_root=self.fixture.merged,
+            instructions_path=self.fixture.resources / "IP_Review_LLM_Instructions.md",
+            base_message="Synthetic base",
+            retry_review_required=retry_review,
+        )
+
+    def test_multiple_batches_form_one_deterministic_continuous_queue(self):
+        report = self.preflight(list(reversed(self.batches)))
+        self.assertEqual([int(item.case.change_id) for item in report.queue], [1, 2, 3, 101, 102])
+
+    def test_success_is_excluded_failed_and_interrupted_retry(self):
+        for record, status in zip(self.records[:3], ("successful", "failed", "interrupted")):
+            self.log.append(record, status, batch=self.batches[0].name, attachment_count=2, run_id="run")
+        report = self.preflight()
+        ids = {int(item.case.change_id) for item in report.queue}
+        self.assertNotIn(1, ids)
+        self.assertIn(2, ids)
+        self.assertIn(3, ids)
+
+    def test_uncertain_requires_explicit_retry(self):
+        self.log.append(self.records[0], "requires_review", batch=self.batches[0].name, attachment_count=2, run_id="run")
+        self.assertNotIn(1, {int(item.case.change_id) for item in self.preflight().queue})
+        self.assertIn(1, {int(item.case.change_id) for item in self.preflight(retry_review=True).queue})
+
+    def test_all_success_without_output_warns_and_queues_nothing(self):
+        first_batch_records = self.records[:3]
+        for record in first_batch_records:
+            self.log.append(record, "successful", batch=self.batches[0].name, attachment_count=2, run_id="run")
+        report = self.preflight([self.batches[0]])
+        self.assertFalse(report.queue)
+        self.assertTrue(any("REQUIRES REVIEW" in value for value in report.summaries[0].warnings))
+
+    def test_log_is_append_only_and_latest_status_controls_resume(self):
+        record = self.records[0]
+        self.log.append(record, "failed", batch=self.batches[0].name, attachment_count=2, run_id="one")
+        self.log.append(record, "successful", batch=self.batches[0].name, attachment_count=2, run_id="two")
+        with self.log_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(self.log.latest()[record.canonical_key].status, "successful")
+
+    def test_existing_sanitized_five_column_log_is_supported(self):
+        self.log_path.parent.mkdir(parents=True)
+        with self.log_path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["change_id", "InterestedPartyId", "fully_sent_at_local", "run_number", "change_id_status"])
+            writer.writeheader()
+            writer.writerow({"change_id": self.records[0].change_id, "InterestedPartyId": self.records[0].interested_party_id, "fully_sent_at_local": "synthetic", "run_number": "1", "change_id_status": "successful"})
+        self.assertEqual(len(self.log.latest()), 1)
+        self.log.append(self.records[1], "failed", batch=self.batches[0].name, attachment_count=2, run_id="new")
+        with self.log_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            fields = csv.DictReader(handle).fieldnames
+        self.assertIn("source_batch", fields)
+
+    def test_batch_lock_identifies_current_holder_and_releases(self):
+        first = BatchLockSet(self.workspace.working_space, [self.batches[0].name], "first.user", "one")
+        second = BatchLockSet(self.workspace.working_space, [self.batches[0].name], "second.user", "two")
+        first.acquire()
+        try:
+            with self.assertRaises(BatchLockedError) as caught:
+                second.acquire()
+            self.assertIn("first.user", str(caught.exception))
+            self.assertIn(self.batches[0].name, str(caught.exception))
+        finally:
+            first.release()
+        second.acquire()
+        second.release()
+
+    def test_contested_multi_batch_lock_is_all_or_nothing(self):
+        occupied = BatchLockSet(self.workspace.working_space, [self.batches[1].name], "holder", "one")
+        contender = BatchLockSet(self.workspace.working_space, [b.name for b in self.batches], "other", "two")
+        occupied.acquire()
+        try:
+            with self.assertRaises(BatchLockedError):
+                contender.acquire()
+            first_lock = self.workspace.working_space / ".justify-ip-change-locks" / f"{self.batches[0].name}.lock"
+            self.assertFalse(first_lock.exists())
+        finally:
+            occupied.release()
+
+    def test_simulated_end_to_end_and_resume(self):
+        report = self.preflight()
+        outcomes = {report.queue[1].key: "failed"}
+        adapter = SimulationAdapter(outcomes)
+        result = asyncio.run(execute_queue(report, self.workspace, self.log, adapter, user="synthetic.user", run_id="run-one"))
+        self.assertEqual(result.processed, 5)
+        self.assertEqual(result.successful, 4)
+        resumed = self.preflight()
+        self.assertEqual([item.key for item in resumed.queue], [report.queue[1].key])
+
+    def test_interruption_is_durably_logged_and_resumable(self):
+        report = self.preflight([self.batches[0]])
+
+        class InterruptingAdapter(SimulationAdapter):
+            async def process(self, item):
+                raise asyncio.CancelledError()
+
+        with self.assertRaises(asyncio.CancelledError):
+            asyncio.run(execute_queue(report, self.workspace, self.log, InterruptingAdapter(), user="synthetic.user", run_id="interrupt"))
+        latest = self.log.latest()
+        self.assertEqual(latest[report.queue[0].key].status, "interrupted")
+        self.assertIn(report.queue[0].key, [item.key for item in self.preflight([self.batches[0]]).queue])
+
+    def test_post_send_interruption_requires_review_and_is_not_auto_resumed(self):
+        report = self.preflight([self.batches[0]])
+
+        class PostSendInterruptingAdapter(SimulationAdapter):
+            async def process(self, item):
+                raise PostSendCancelledError()
+
+        with self.assertRaises(PostSendCancelledError):
+            asyncio.run(
+                execute_queue(
+                    report,
+                    self.workspace,
+                    self.log,
+                    PostSendInterruptingAdapter(),
+                    user="synthetic.user",
+                    run_id="post-send-interrupt",
+                )
+            )
+        latest = self.log.latest()
+        self.assertEqual(latest[report.queue[0].key].status, "requires_review")
+        self.assertNotIn(report.queue[0].key, [item.key for item in self.preflight([self.batches[0]]).queue])
+
+
+class HundredCaseFixtureTest(unittest.TestCase):
+    def test_exactly_100_cases_and_final_partial_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(Path(directory), counts=(100, 7))
+            records = load_case_workbook(fixture.resources / "07_Interested_Parties_Changes_15576.xlsx")
+            batches = discover_batches(fixture.root)
+            report = build_preflight(
+                batches,
+                records,
+                {},
+                merged_root=fixture.merged,
+                instructions_path=fixture.resources / "IP_Review_LLM_Instructions.md",
+                base_message="Synthetic base",
+            )
+            self.assertEqual(len(report.queue), 107)
+            self.assertEqual(report.summaries[0].total_cases, 100)
+            self.assertEqual(report.summaries[1].total_cases, 7)
+
+
+class CLIDryRunTest(unittest.TestCase):
+    def test_top_level_dry_run_has_no_operational_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(Path(directory))
+            args = parse_args(
+                [
+                    "--workspace",
+                    str(fixture.resources),
+                    "--simulation-root",
+                    directory,
+                    "--batches",
+                    fixture.batches[0].name,
+                    fixture.batches[1].name,
+                    "--dry-run",
+                ]
+            )
+            output = io.StringIO()
+            with patch(
+                "justify_ip_change_copilot_chat_ui.cli.windows_account_name",
+                return_value="synthetic.user",
+            ), contextlib.redirect_stdout(output):
+                result = run_cli(args)
+            self.assertEqual(result, 0)
+            text = output.getvalue()
+            self.assertIn("Remaining eligible cases: 5", text)
+            self.assertIn("Dry run complete", text)
+            self.assertFalse((fixture.users / "synthetic.user" / LOG_FILENAME).exists())
+            self.assertFalse((fixture.working / ".justify-ip-change-locks").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

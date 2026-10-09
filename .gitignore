@@ -1,1 +1,11 @@
 OperationsPool-KeepAwake/OperationsPool-KeepAwake.log
+sanitized_step_08.zip
+
+# Justify IP Change runtime and developer artefacts
+Justify IP Change - Copilot Chat UI/.venv/
+Justify IP Change - Copilot Chat UI/.pytest_cache/
+Justify IP Change - Copilot Chat UI/**/__pycache__/
+Justify IP Change - Copilot Chat UI/**/*.py[cod]
+Justify IP Change - Copilot Chat UI/diagnostics/
+Justify IP Change - Copilot Chat UI/runtime/
+Justify IP Change - Copilot Chat UI/*.log

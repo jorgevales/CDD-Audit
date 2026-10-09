@@ -1,0 +1,252 @@
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+import re
+import time
+from typing import Protocol
+
+from .edge_session import EdgeSession
+from .errors import CopilotUIError, PostSendCancelledError, SubmissionUncertainError
+from .models import QueueItem
+
+
+COPILOT_URL = "https://m365.cloud.microsoft/chat"
+EDITOR_SELECTORS = (
+    "div[contenteditable='true'][role='textbox']",
+    "textarea[placeholder*='message' i]",
+    "textarea[aria-label*='message' i]",
+)
+ATTACH_SELECTORS = (
+    "input[type='file']",
+    "#plus-menu-container input[type='file']",
+)
+SEND_SELECTORS = (
+    "button[aria-label='Send']",
+    "button[aria-label^='Send ']:not([aria-label*='stop' i])",
+    "button[data-testid='submit-button']",
+)
+MODEL_PICKER_SELECTORS = (
+    "#gptModeSwitcher",
+    "button[aria-label*='Model Selector' i]",
+    "button[aria-label*='mode selector' i]",
+)
+
+
+@dataclass(frozen=True)
+class CaseOutcome:
+    status: str
+    detail: str = ""
+
+
+class CopilotAdapter(Protocol):
+    async def start(self) -> None: ...
+    async def process(self, item: QueueItem) -> CaseOutcome: ...
+    async def close(self) -> None: ...
+
+
+class SimulationAdapter:
+    def __init__(self, outcomes: dict[tuple[str, str], str] | None = None) -> None:
+        self.outcomes = outcomes or {}
+        self.processed: list[tuple[str, str]] = []
+
+    async def start(self) -> None:
+        return
+
+    async def process(self, item: QueueItem) -> CaseOutcome:
+        self.processed.append(item.key)
+        return CaseOutcome(self.outcomes.get(item.key, "successful"), "synthetic simulation")
+
+    async def close(self) -> None:
+        return
+
+
+class PlaywrightCopilotAdapter:
+    """Visible, bounded Microsoft 365 Copilot Chat adapter.
+
+    A new chat is used per case. Send is committed only when both the composer
+    clears and a matching user turn appears. Any ambiguous post-click state is
+    raised as requiring manual review and is never resent automatically.
+    """
+
+    def __init__(self, edge: EdgeSession, *, model: str | None = None, startup_timeout: float = 180, response_timeout: float = 1800) -> None:
+        self.edge = edge
+        self.model = model
+        self.startup_timeout = startup_timeout
+        self.response_timeout = response_timeout
+        self.manager = None
+        self.playwright = None
+        self.browser = None
+        self.context = None
+        self.page = None
+
+    async def _first_visible(self, selectors: tuple[str, ...], timeout: float = 0):
+        deadline = time.monotonic() + timeout
+        while True:
+            for selector in selectors:
+                locator = self.page.locator(selector)
+                for index in range(min(await locator.count(), 20)):
+                    item = locator.nth(index)
+                    if await item.is_visible():
+                        return item
+            if time.monotonic() >= deadline:
+                return None
+            await asyncio.sleep(0.15)
+
+    async def start(self) -> None:
+        self.edge.ensure_started(timeout=min(self.startup_timeout, 120))
+        from playwright.async_api import async_playwright
+
+        self.manager = async_playwright()
+        self.playwright = await self.manager.start()
+        self.browser = await self.playwright.chromium.connect_over_cdp(self.edge.endpoint, timeout=int(self.startup_timeout * 1000))
+        self.context = self.browser.contexts[0]
+        self.page = await self.context.new_page()
+        await self.page.goto(COPILOT_URL, wait_until="domcontentloaded", timeout=int(self.startup_timeout * 1000))
+        await self.page.bring_to_front()
+        print("Edge is visible. Complete Microsoft 365 sign-in in Edge if prompted.")
+        deadline = time.monotonic() + self.startup_timeout
+        while time.monotonic() < deadline:
+            if await self._first_visible(EDITOR_SELECTORS) and await self._first_visible(MODEL_PICKER_SELECTORS):
+                if self.model:
+                    await self._select_model(self.model)
+                return
+            await asyncio.sleep(0.25)
+        raise CopilotUIError("Copilot did not become ready. Complete sign-in and restart the run.")
+
+    async def _fresh_chat(self) -> None:
+        await self.page.goto(COPILOT_URL, wait_until="domcontentloaded", timeout=30000)
+        existing = self.page.locator("[data-testid='chatQuestion'],.fai-UserMessage")
+        if await existing.count():
+            controls = self.page.locator("button[aria-label*='New chat' i],a[aria-label*='New chat' i]")
+            if await controls.count() and await controls.first.is_visible():
+                await controls.first.click()
+                deadline = time.monotonic() + 10
+                while await existing.count() and time.monotonic() < deadline:
+                    await asyncio.sleep(0.1)
+        editor = await self._first_visible(EDITOR_SELECTORS, 30)
+        if editor is None:
+            raise CopilotUIError("A fresh Copilot composer did not become available.")
+        if (await self._editor_text(editor)).strip():
+            raise CopilotUIError("The fresh Copilot composer is not empty.")
+
+    async def _editor_text(self, editor) -> str:
+        tag = str(await editor.evaluate("node => node.tagName || ''")).casefold()
+        return await editor.input_value() if tag in {"textarea", "input"} else await editor.inner_text()
+
+    async def _attach(self, item: QueueItem) -> None:
+        inputs = self.page.locator(",".join(ATTACH_SELECTORS))
+        if not await inputs.count():
+            # Reveal the file input through the visible attachment control.
+            button = self.page.locator("#plus-menu-container button,[data-testid='PlusMenuButton']").first
+            if not await button.is_visible():
+                raise CopilotUIError("The Copilot attachment control is unavailable.")
+            await button.click()
+            inputs = self.page.locator(",".join(ATTACH_SELECTORS))
+        if not await inputs.count():
+            raise CopilotUIError("The Copilot file input did not become available.")
+        await inputs.first.set_input_files([str(path) for path in item.attachments.paths])
+        expected = {path.name.casefold() for path in item.attachments.paths}
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            names = await self.page.locator("button[aria-label^='Remove attachment ']").evaluate_all(
+                "nodes => nodes.map(n => (n.getAttribute('aria-label') || '').replace(/^Remove attachment /i, ''))"
+            )
+            if expected <= {str(name).casefold() for name in names}:
+                send = await self._first_visible(SEND_SELECTORS)
+                if send is not None and await send.is_enabled():
+                    return
+            await asyncio.sleep(0.25)
+        raise CopilotUIError("Attachments did not finish loading before the bounded timeout.")
+
+    async def _select_model(self, label: str) -> None:
+        picker = await self._first_visible(MODEL_PICKER_SELECTORS, 10)
+        if picker is None:
+            raise CopilotUIError("The Copilot model picker is unavailable.")
+        await picker.click()
+        pattern = re.compile(rf"^{re.escape(label)}$", re.IGNORECASE)
+        options = self.page.get_by_role("radio", name=pattern).or_(
+            self.page.get_by_role("menuitemradio", name=pattern)
+        )
+        if not await options.count():
+            options = self.page.get_by_text(pattern, exact=True)
+        for index in range(await options.count()):
+            option = options.nth(index)
+            if await option.is_visible():
+                await option.click()
+                return
+        raise CopilotUIError(f"The requested Copilot model is not available in the visible picker: {label}")
+
+    async def _response_text(self) -> str:
+        selectors = (
+            "[data-testid='copilot-message-reply-div'] [data-message-type='Chat']",
+            "[data-testid='markdown-reply']",
+            ".fai-CopilotMessage__content",
+        )
+        candidates = []
+        for selector in selectors:
+            locator = self.page.locator(selector)
+            for index in range(await locator.count()):
+                item = locator.nth(index)
+                if await item.is_visible():
+                    candidates.append(await item.inner_text())
+        return candidates[-1] if candidates else ""
+
+    async def process(self, item: QueueItem) -> CaseOutcome:
+        await self._fresh_chat()
+        await self._attach(item)
+        editor = await self._first_visible(EDITOR_SELECTORS, 10)
+        await editor.fill(item.prompt)
+        actual = (await self._editor_text(editor)).replace("\r\n", "\n").strip()
+        if actual != item.prompt.strip():
+            raise CopilotUIError("The Copilot composer did not preserve the complete prompt; Send was not clicked.")
+        send = await self._first_visible(SEND_SELECTORS, 10)
+        if send is None or not await send.is_enabled():
+            raise CopilotUIError("The Copilot Send control is not ready.")
+        try:
+            # From this point onward, every failure is potentially post-send and
+            # must never be treated as an automatically retryable ordinary error.
+            await send.click(no_wait_after=True)
+            commit_deadline = time.monotonic() + 20
+            committed = False
+            while time.monotonic() < commit_deadline:
+                composer_empty = not (await self._editor_text(editor)).strip()
+                user_text = await self.page.locator("[data-testid='chatQuestion'],.fai-UserMessage").all_inner_texts()
+                if composer_empty and any(item.case.change_id in text for text in user_text):
+                    committed = True
+                    break
+                await asyncio.sleep(0.2)
+            if not committed:
+                raise SubmissionUncertainError("Send was attempted, but a cleared composer and matching user turn were not both observed.")
+            deadline = time.monotonic() + self.response_timeout
+            stable_text = ""
+            stable = 0
+            while time.monotonic() < deadline:
+                text = await self._response_text()
+                status_match = re.search(
+                    rf"^Case result:\s*{re.escape(item.case.change_id)}\s*\|\s*(successful|failed)\s*$",
+                    text,
+                    re.IGNORECASE | re.MULTILINE,
+                )
+                if status_match:
+                    stable = stable + 1 if text == stable_text else 1
+                    stable_text = text
+                    if stable >= 3:
+                        return CaseOutcome(status_match.group(1).casefold(), "exact final audit result captured")
+                await asyncio.sleep(0.5)
+            raise SubmissionUncertainError("The request was submitted, but no stable exact final audit result was captured before timeout.")
+        except SubmissionUncertainError:
+            raise
+        except asyncio.CancelledError as exc:
+            raise PostSendCancelledError() from exc
+        except Exception as exc:
+            raise SubmissionUncertainError(
+                f"An error occurred after Send was attempted ({type(exc).__name__}); inspect the visible chat before retrying."
+            ) from exc
+
+    async def close(self) -> None:
+        # Stopping Playwright disconnects CDP without closing the retained,
+        # visible, signed-in Edge process or its tabs.
+        if self.manager is not None:
+            await self.manager.stop()
+        self.edge.close_owned()

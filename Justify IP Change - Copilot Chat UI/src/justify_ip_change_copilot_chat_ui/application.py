@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+
+from .copilot_ui import CopilotAdapter
+from .errors import CopilotUIError, PostSendCancelledError, SubmissionUncertainError
+from .logs import BatchLockSet, CaseLog
+from .models import PreflightReport, WorkspacePaths
+from .progress import ProgressDisplay
+
+
+@dataclass(frozen=True)
+class RunResult:
+    processed: int
+    successful: int
+    failed: int
+    review_required: int
+    interrupted: bool = False
+
+
+async def execute_queue(
+    report: PreflightReport,
+    workspace: WorkspacePaths,
+    log: CaseLog,
+    adapter: CopilotAdapter,
+    *,
+    user: str,
+    run_id: str,
+) -> RunResult:
+    progress = ProgressDisplay(len(report.queue))
+    progress.show("continuous queue ready")
+    processed = successful = failed = review = 0
+    run_number = log.next_run_number()
+    locks = BatchLockSet(workspace.working_space, [batch.name for batch in report.selected_batches], user, run_id)
+    with locks:
+        try:
+            await adapter.start()
+            for item in report.queue:
+                print(f"Processing {item.batch.name}: change_id {item.case.change_id}")
+                try:
+                    outcome = await adapter.process(item)
+                    status = outcome.status
+                    detail = outcome.detail
+                except SubmissionUncertainError as exc:
+                    status = "requires_review"
+                    detail = str(exc)
+                except CopilotUIError as exc:
+                    status = "failed"
+                    detail = str(exc)
+                except Exception as exc:
+                    status = "failed"
+                    detail = f"{type(exc).__name__}: {exc}"
+                except PostSendCancelledError:
+                    log.append(
+                        item.case,
+                        "requires_review",
+                        batch=item.batch.name,
+                        attachment_count=len(item.attachments.paths),
+                        run_id=run_id,
+                        run_number=run_number,
+                        detail="operator interruption after Send was attempted; inspect the visible chat before retrying",
+                    )
+                    progress.recorded("post-send interruption requires review")
+                    raise
+                except asyncio.CancelledError:
+                    log.append(
+                        item.case,
+                        "interrupted",
+                        batch=item.batch.name,
+                        attachment_count=len(item.attachments.paths),
+                        run_id=run_id,
+                        run_number=run_number,
+                        detail="operator interruption before a terminal result",
+                    )
+                    progress.recorded("interrupted and durably logged")
+                    raise
+                log.append(
+                    item.case,
+                    status,
+                    batch=item.batch.name,
+                    attachment_count=len(item.attachments.paths),
+                    run_id=run_id,
+                    run_number=run_number,
+                    detail=detail,
+                )
+                processed += 1
+                successful += status == "successful"
+                failed += status == "failed"
+                review += status in {"requires_review", "inconclusive_review_needed"}
+                progress.recorded(f"last outcome: {status}")
+        finally:
+            await adapter.close()
+    return RunResult(processed, successful, failed, review)

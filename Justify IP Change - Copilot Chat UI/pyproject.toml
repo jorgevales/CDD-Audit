@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "justify-ip-change-copilot-chat-ui"
+version = "1.0.0"
+description = "Resumable Microsoft 365 Copilot Chat queue runner for Step 08 IP-change review"
+requires-python = ">=3.10"
+dependencies = [
+  "openpyxl==3.1.5",
+  "playwright==1.55.0",
+]
+
+[project.scripts]
+justify-ip-change = "justify_ip_change_copilot_chat_ui.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
