@@ -36,9 +36,13 @@ class SharedLauncherContractTests(unittest.TestCase):
             "SETUP LOCKED:",
             "--no-download",
             "--no-periodic-update",
+            "'--seeder','pip'",
             "PIP_TARGET",
             "requirements.lock.txt",
-            "Preserve-Environment",
+            "Remove-IncompleteEnvironments",
+            "Remove-EnvironmentDirectory",
+            "mapped_shared_root",
+            "normalized_final_path",
             "$WindowsAccount",
             ".setup-logs",
             "[System.IO.Path]::GetTempPath()",
@@ -47,6 +51,7 @@ class SharedLauncherContractTests(unittest.TestCase):
         ):
             self.assertIn(required, source)
         self.assertNotIn("LOCALAPPDATA", source)
+        self.assertNotIn("Preserve-Environment", source)
         self.assertLess(source.index("$LogPath = $null"), source.index("function Find-Python"))
 
     def test_all_cmd_entrypoints_use_policy_tolerant_launcher(self):

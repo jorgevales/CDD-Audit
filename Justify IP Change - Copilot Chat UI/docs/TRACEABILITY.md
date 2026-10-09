@@ -20,7 +20,7 @@ The supplied `sanitized_step_08.zip` was reviewed as a read-only reference and r
 
 ## Reviewed secondary reference
 
-The current Copilot Local Agent supplied the VDI-confirmed shared setup method: shared-drive Python, project-local `.venv`, exclusive setup lock, hash-verified bundled `virtualenv.pyz`, exact transitive pins, isolated Python flags, and preservation of incomplete environments. It also supplied the mapped-S:/UNC final-path pattern, visible Edge startup, loopback CDP validation, dedicated-profile ownership checks, interactive-login readiness, selector isolation, bounded waits, and the rule that an ambiguous send must not be replayed. No runtime dependency on that project was introduced; the required bootstrap asset is bundled locally.
+The current Copilot Local Agent supplied the VDI-confirmed shared setup method: shared-drive Python, project-local `.venv`, exclusive setup lock, hash-verified bundled `virtualenv.pyz`, exact transitive pins, and isolated Python flags. It also supplied the mapped-S:/UNC final-path pattern, visible Edge startup, loopback CDP validation, dedicated-profile ownership checks, interactive-login readiness, selector isolation, bounded waits, and the rule that an ambiguous send must not be replayed. This project automatically removes incomplete environments under the locked project root. No runtime dependency on the Local Agent project was introduced; the required bootstrap asset is bundled locally.
 
 ## Reviewed CDD Audit conventions
 

@@ -125,24 +125,69 @@ function Test-WorkingPip([string]$Python) {
     } finally { $ErrorActionPreference = $priorPreference }
 }
 
-function Preserve-Environment([string]$EnvironmentPath) {
-    $archive = Join-Path $ProjectRoot ('.venv-incomplete-' + [guid]::NewGuid().ToString('N'))
-    $root = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\') + '\'
-    if (-not [System.IO.Path]::GetFullPath($EnvironmentPath).StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Environment recovery path is outside this project.' }
-    Move-Item -LiteralPath $EnvironmentPath -Destination $archive -ErrorAction Stop
-    Write-RunLog ('Preserved the incomplete environment at ' + $archive)
+function Remove-EnvironmentDirectory([string]$EnvironmentPath, [string]$Reason) {
+    if (-not (Test-Path -LiteralPath $EnvironmentPath)) { return }
+    $entry = Get-Item -LiteralPath $EnvironmentPath -Force
+    $fullPath = [System.IO.Path]::GetFullPath($entry.FullName).TrimEnd('\')
+    $projectPath = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
+    $allowedName = $entry.Name -eq '.venv' -or $entry.Name.StartsWith('.venv-incomplete-', [System.StringComparison]::OrdinalIgnoreCase)
+    if (-not $allowedName -or [System.IO.Path]::GetDirectoryName($fullPath) -ine $projectPath) { throw 'Environment cleanup target is outside the approved project scope.' }
+    if (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Environment cleanup refused a redirected path.' }
+    Write-RunLog ($Reason + ': ' + $fullPath)
+    Remove-Item -LiteralPath $fullPath -Recurse -Force -ErrorAction Stop
+}
+
+function Remove-IncompleteEnvironments {
+    foreach ($entry in @(Get-ChildItem -LiteralPath $ProjectRoot -Directory -Force -Filter '.venv-incomplete-*' -ErrorAction SilentlyContinue)) {
+        Remove-EnvironmentDirectory $entry.FullName 'Deleting obsolete incomplete environment'
+    }
 }
 
 function Assert-Runtime([string]$Python, [bool]$RequireShared) {
     $mode = if ($RequireShared) { 'shared' } else { 'development' }
     $probe = @'
 import ntpath
+import os
 import sys
 import sysconfig
+from functools import lru_cache
 from importlib.metadata import distribution
 
+WINDOWS_SLASH = chr(92)
+
+def normalized_final_path(value):
+    result = os.path.realpath(value, strict=True)
+    extended = WINDOWS_SLASH * 2 + '?' + WINDOWS_SLASH
+    unc_prefix = extended + 'UNC' + WINDOWS_SLASH
+    if result[:len(unc_prefix)].casefold() == unc_prefix.casefold():
+        result = WINDOWS_SLASH * 2 + result[len(unc_prefix):]
+    elif result.startswith(extended):
+        result = result[len(extended):]
+    return ntpath.normcase(ntpath.normpath(result)).rstrip(WINDOWS_SLASH)
+
+@lru_cache(maxsize=1)
+def mapped_shared_root():
+    try:
+        result = normalized_final_path('S:' + WINDOWS_SLASH)
+    except (OSError, ValueError):
+        return None
+    return result if result.startswith(WINDOWS_SLASH * 2) else None
+
 def is_shared(value):
-    return isinstance(value, str) and ntpath.isabs(value) and ntpath.splitdrive(ntpath.normpath(value))[0].casefold() == 's:'
+    if not isinstance(value, str) or not ntpath.isabs(value):
+        return False
+    if ntpath.splitdrive(ntpath.normpath(value))[0].casefold() == 's:':
+        return True
+    if not value.startswith(WINDOWS_SLASH * 2):
+        return False
+    root = mapped_shared_root()
+    if root is None:
+        return False
+    try:
+        resolved = normalized_final_path(value)
+    except (OSError, ValueError):
+        return False
+    return resolved == root or resolved.startswith(root + WINDOWS_SLASH)
 
 assert sys.version_info >= (3, 10), 'Python 3.10+ is required.'
 if sys.argv[1] == 'shared':
@@ -170,10 +215,11 @@ function Initialize-Environment([string]$BasePython) {
         try { $setupLock = [System.IO.File]::Open($lockPath,[System.IO.FileMode]::OpenOrCreate,[System.IO.FileAccess]::ReadWrite,[System.IO.FileShare]::None) }
         catch { throw 'SETUP LOCKED: another user is already setting up this shared project, or the project is not writable. Wait for that setup to finish and retry.' }
         Write-RunLog ('Setup lock acquired: ' + $lockPath)
+        Remove-IncompleteEnvironments
         if (Test-Path -LiteralPath $environmentPath) {
             if (-not (Test-Path -LiteralPath (Join-Path $environmentPath 'pyvenv.cfg') -PathType Leaf) -or -not (Test-Path -LiteralPath $environmentPython -PathType Leaf) -or -not (Test-WorkingPip $environmentPython)) {
                 Write-RunLog 'The existing project environment is incomplete or has no working pip.'
-                Preserve-Environment $environmentPath
+                Remove-EnvironmentDirectory $environmentPath 'Deleting unusable project environment before repair'
             } else { Write-RunLog 'Reusing the existing shared project environment.' }
         }
         if (-not (Test-Path -LiteralPath $environmentPath)) {
@@ -182,12 +228,12 @@ function Initialize-Environment([string]$BasePython) {
             if ($actualHash -ne $BootstrapSha256) { throw 'Bundled virtualenv bootstrap failed its SHA-256 check. Restore the official repository files and retry.' }
             Write-RunLog ('Bundled bootstrap verified: SHA256 ' + $actualHash)
             try {
-                Invoke-NativeLogged $BasePython @('-B','-E','-s',$bootstrap,'--no-download','--no-periodic-update',$environmentPath) 'Creating the shared project environment'
-                if (-not (Test-WorkingPip $environmentPython)) { throw 'Default virtualenv seeder did not create working pip.' }
+                Invoke-NativeLogged $BasePython @('-B','-E','-s',$bootstrap,'--no-download','--no-periodic-update','--seeder','pip',$environmentPath) 'Creating the shared project environment with the VDI-confirmed direct pip seeder'
+                if (-not (Test-WorkingPip $environmentPython)) { throw 'The direct pip seeder did not create working pip.' }
             } catch {
-                Write-RunLog ('Default seeder failed: ' + $_.Exception.Message)
-                if (Test-Path -LiteralPath $environmentPath) { Preserve-Environment $environmentPath }
-                Invoke-NativeLogged $BasePython @('-B','-E','-s',$bootstrap,'--no-download','--no-periodic-update','--seeder','pip',$environmentPath) 'Retrying environment creation with the direct pip seeder'
+                Write-RunLog ('Environment creation failed: ' + $_.Exception.Message)
+                if (Test-Path -LiteralPath $environmentPath) { Remove-EnvironmentDirectory $environmentPath 'Deleting failed environment creation output' }
+                throw
             }
         }
         if (-not (Test-WorkingPip $environmentPython)) { throw 'The project environment has no working pip after creation. Existing files were retained.' }

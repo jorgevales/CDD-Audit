@@ -22,7 +22,7 @@ Offline tests do not require `S:`, Edge, a Microsoft account, real documents, or
 4. Select one or more displayed eligible batches.
 5. Review the preflight summary and enter `y` to lock the batches and start visible Edge automation.
 
-`python_path.txt` beside `Setup.cmd` may contain one approved full `python.exe` path when automatic Python discovery is unsuitable. In an `S:` deployment, the complete base Python installation must also be on `S:`. The launcher uses isolated `-B -E -s` flags, verifies the bundled environment bootstrap by SHA-256, installs only exact versions from `requirements.lock.txt`, and preserves an incomplete `.venv` under a unique `.venv-incomplete-*` name rather than deleting it.
+`python_path.txt` beside `Setup.cmd` may contain one approved full `python.exe` path when automatic Python discovery is unsuitable. In an `S:` deployment, the complete base Python installation must resolve to `S:` or the same UNC share currently mapped as `S:`. The launcher uses isolated `-B -E -s` flags, verifies the bundled environment bootstrap by SHA-256, uses the VDI-confirmed direct pip seeder, installs only exact versions from `requirements.lock.txt`, and automatically removes failed or obsolete incomplete environments while holding the setup lock.
 
 Every invocation creates a diagnostic log before Python discovery under `.setup-logs\<Windows-account>`. If that shared location cannot be written, logging falls back to `%TEMP%\JustifyIPChange-SetupLogs`. The terminal always prints the exact log path.
 
