@@ -2,7 +2,7 @@
 setlocal
 pushd "%~dp0" >nul 2>&1
 if errorlevel 1 goto :failed
-powershell.exe -NoProfile -File "%~dp0WorkflowBootstrap.ps1" -Action Setup
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Launcher.ps1" -Action Setup
 set "JIP_EXIT=%ERRORLEVEL%"
 popd >nul 2>&1
 if not "%JIP_EXIT%"=="0" goto :failed

@@ -16,13 +16,15 @@ Offline tests do not require `S:`, Edge, a Microsoft account, real documents, or
 
 ## One-time setup and startup
 
-1. Double-click `Setup.cmd` once for each Windows user. It creates a private environment beneath `%LOCALAPPDATA%\CDD Audit\JustifyIPChangeCopilotChatUI` rather than sharing a virtual environment from the source folder.
+1. From the shared `S:` project folder, double-click `Setup.cmd` once after deployment or dependency changes. It creates or repairs one locked project environment at `.venv` for all VDI users. If another setup owns the lock, the launcher says `SETUP LOCKED` and makes no competing changes.
 2. Double-click `Start Justify IP Change.cmd`.
 3. Paste or select the operational `...\Working Space\Copilot resources` path.
 4. Select one or more displayed eligible batches.
 5. Review the preflight summary and enter `y` to lock the batches and start visible Edge automation.
 
-`python_path.txt` beside `Setup.cmd` may contain one approved full `python.exe` path when automatic Python discovery is unsuitable. This file is ignored by Git.
+`python_path.txt` beside `Setup.cmd` may contain one approved full `python.exe` path when automatic Python discovery is unsuitable. In an `S:` deployment, the complete base Python installation must also be on `S:`. The launcher uses isolated `-B -E -s` flags, verifies the bundled environment bootstrap by SHA-256, installs only exact versions from `requirements.lock.txt`, and preserves an incomplete `.venv` under a unique `.venv-incomplete-*` name rather than deleting it.
+
+Every invocation creates a diagnostic log before Python discovery under `.setup-logs\<Windows-account>`. If that shared location cannot be written, logging falls back to `%TEMP%\JustifyIPChange-SetupLogs`. The terminal always prints the exact log path.
 
 ## Workspace contract
 
@@ -123,7 +125,7 @@ The suite covers deep paths with spaces, simulated drive resolution, required re
 
 1. Pull the existing CDD Audit repository beneath the approved shared-drive source location.
 2. Confirm the operational workspace is separate and has the required structure.
-3. Run `Setup.cmd` as each user.
+3. Run `Setup.cmd` once from the shared project. Repeat only to repair or update the shared environment.
 4. Run `Run Tests.cmd` once on the VDI.
 5. Perform a dry run against synthetic workspace data.
 6. Perform one visible synthetic Copilot submission after interactive login.
@@ -131,6 +133,9 @@ The suite covers deep paths with spaces, simulated drive resolution, required re
 
 ## Troubleshooting
 
+- **Setup did not finish:** copy the exact diagnostic log path printed at launcher startup. Logs exist before Python discovery begins.
+- **`SETUP LOCKED`:** another user is setting up the shared project, or the project is not writable. Wait for that setup to finish and retry.
+- **Python rejected on S:** use a complete Python 3.10+ installation on `S:`; a local interpreter is deliberately rejected for shared deployment.
 - **Invalid workspace:** select `Working Space\Copilot resources`, not the data root or source folder.
 - **S: unavailable or UNC rejected:** reconnect `S:`. The UNC path must resolve inside the share currently mapped to `S:`.
 - **Missing resources:** the preflight reports all missing required paths together.

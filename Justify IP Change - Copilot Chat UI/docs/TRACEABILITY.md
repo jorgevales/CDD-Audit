@@ -16,12 +16,12 @@ The supplied `sanitized_step_08.zip` was reviewed as a read-only reference and r
 | Terminal progress | `progress.py` | Remaining count covers the entire selected queue and changes only after durable logging. |
 | Edge/CDP and UI selectors | `edge_session.py`, `copilot_ui.py` | Isolated, visible, bounded, profile-validated, interactive-login capable. |
 | Inline self-tests | `tests/test_workflow.py` | Replaced by synthetic unit and integration-style tests. |
-| Runtime diagnostic folder beside source | per-user bootstrap logs and operational log | No runtime output is written into the source repository. |
+| Setup diagnostics | `.setup-logs/<Windows-account>` with `%TEMP%` fallback | Logging begins before interpreter discovery and captures native setup output. The ignored shared folder makes failures supportable without tracking logs. |
 
 ## Reviewed secondary reference
 
-The current Copilot Local Agent supplied the mapped-S:/UNC final-path pattern, visible Edge startup, loopback CDP validation, dedicated-profile ownership checks, interactive-login readiness, selector isolation, bounded waits, and the rule that an ambiguous send must not be replayed. No runtime dependency on that project was introduced.
+The current Copilot Local Agent supplied the VDI-confirmed shared setup method: shared-drive Python, project-local `.venv`, exclusive setup lock, hash-verified bundled `virtualenv.pyz`, exact transitive pins, isolated Python flags, and preservation of incomplete environments. It also supplied the mapped-S:/UNC final-path pattern, visible Edge startup, loopback CDP validation, dedicated-profile ownership checks, interactive-login readiness, selector isolation, bounded waits, and the rule that an ambiguous send must not be replayed. No runtime dependency on that project was introduced; the required bootstrap asset is bundled locally.
 
 ## Reviewed CDD Audit conventions
 
-The project follows the existing repository's self-contained subproject pattern: root `app.py`, `.cmd` launchers, a PowerShell bootstrap, `requirements.txt`, `src`, `tests`, `README.md`, and `docs`. Its virtual environment and diagnostics are per user under `%LOCALAPPDATA%`, not shared in the repository.
+The project follows the existing repository's self-contained subproject pattern: root `app.py`, `.cmd` launchers, `Launcher.ps1`, exact dependency lock, bundled bootstrap, `src`, `tests`, `README.md`, and `docs`. Its environment is locked and shared within the `S:` project; setup diagnostics are separated by Windows account and ignored by Git.

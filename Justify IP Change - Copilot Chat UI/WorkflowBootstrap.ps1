@@ -3,6 +3,10 @@ param(
     [string]$Action = "Setup"
 )
 
+# Compatibility entrypoint retained for existing shortcuts. New launchers call Launcher.ps1 directly.
+& (Join-Path $PSScriptRoot 'Launcher.ps1') -Action $Action
+exit $LASTEXITCODE
+
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSCommandPath

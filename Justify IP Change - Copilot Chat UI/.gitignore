@@ -1,4 +1,7 @@
 .venv/
+.venv-incomplete-*/
+.venv-setup.lock
+.setup-logs/
 __pycache__/
 *.py[cod]
 .pytest_cache/
