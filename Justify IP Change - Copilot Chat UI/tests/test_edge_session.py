@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import asyncio
 import io
 import json
 import os
@@ -18,6 +19,7 @@ if str(SRC) not in sys.path:
 from justify_ip_change_copilot_chat_ui.edge_session import EdgeSession, _profile_argument, get_cdp_version
 from justify_ip_change_copilot_chat_ui.errors import CopilotUIError
 from justify_ip_change_copilot_chat_ui.profile_storage import default_edge_profile
+from justify_ip_change_copilot_chat_ui.copilot_ui import PlaywrightCopilotAdapter
 
 
 class EdgeSessionTests(unittest.TestCase):
@@ -107,8 +109,30 @@ class EdgeSessionTests(unittest.TestCase):
             with patch.object(session, "_launch_attempt", side_effect=[False, True]) as launch, contextlib.redirect_stdout(output):
                 session.ensure_started(timeout=90)
             self.assertEqual(launch.call_count, 2)
-            self.assertLessEqual(launch.call_args_list[0].args[2], 12)
+            self.assertLessEqual(launch.call_args_list[0].args[2], 6)
             self.assertIn("Edge startup method: dedicated profile and alternate port", output.getvalue())
+
+    def test_requested_port_success_uses_no_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
+            output = io.StringIO()
+            with patch.object(session, "_launch_attempt", return_value=True) as launch, contextlib.redirect_stdout(output):
+                session.ensure_started(timeout=90)
+            launch.assert_called_once()
+            self.assertEqual(launch.call_args.args[1], 9445)
+            self.assertIn("Edge startup method: dedicated profile and requested port", output.getvalue())
+
+    def test_completed_adapter_disconnects_without_closing_edge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = EdgeSession(Path(directory) / "EdgeProfile", port=9445)
+            adapter = PlaywrightCopilotAdapter(session)
+            class Manager:
+                async def stop(self):
+                    return None
+            adapter.manager = Manager()
+            with patch.object(session, "close_owned") as retain:
+                asyncio.run(adapter.close())
+            retain.assert_called_once_with()
 
     def test_explicit_edge_policy_block_stops_before_launch(self):
         with tempfile.TemporaryDirectory() as directory:

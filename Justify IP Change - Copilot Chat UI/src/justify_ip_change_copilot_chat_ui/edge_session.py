@@ -271,7 +271,7 @@ class EdgeSession:
 
         requested_profile = self.profile
         methods = (
-            ("dedicated profile and requested port", requested_profile, self.port, 12.0),
+            ("dedicated profile and requested port", requested_profile, self.port, 6.0),
             ("dedicated profile and alternate port", requested_profile, None, 8.0),
             ("fresh run profile and alternate port", requested_profile.parent / (requested_profile.name + "-run-" + os.urandom(4).hex()), None, 30.0),
         )

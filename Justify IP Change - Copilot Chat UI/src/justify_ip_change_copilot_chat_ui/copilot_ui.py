@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import re
 import time
 from typing import Protocol
+from urllib.parse import urlparse
 
 from .edge_session import EdgeSession, get_cdp_version, validate_existing_profile
 from .errors import CopilotUIError, PostSendCancelledError, SubmissionUncertainError
@@ -123,8 +124,17 @@ class PlaywrightCopilotAdapter:
             raise CopilotUIError("Edge opened its local endpoint, but Playwright could not connect within the startup limit.")
         await asyncio.to_thread(validate_existing_profile, self.edge.port, self.edge.profile)
         self.context = self.browser.contexts[0]
-        self.page = await self.context.new_page()
-        await self.page.goto(COPILOT_URL, wait_until="domcontentloaded", timeout=int(self.startup_timeout * 1000))
+        self.page = next(
+            (
+                page for page in self.context.pages
+                if urlparse(page.url).hostname == "m365.cloud.microsoft"
+                and urlparse(page.url).path.startswith("/chat")
+            ),
+            None,
+        )
+        if self.page is None:
+            self.page = await self.context.new_page()
+            await self.page.goto(COPILOT_URL, wait_until="domcontentloaded", timeout=int(self.startup_timeout * 1000))
         await self.page.bring_to_front()
         print("Edge is visible. Complete Microsoft 365 sign-in in Edge if prompted.")
         deadline = time.monotonic() + self.startup_timeout
