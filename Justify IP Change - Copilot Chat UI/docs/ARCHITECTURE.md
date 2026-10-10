@@ -30,7 +30,7 @@ workspace selection
 
 Queue items retain their source batch. UI code never decides eligibility or persistence. A UI send ambiguity becomes `requires_review`, which is deliberately distinct from retryable failure.
 
-The adapter keeps one page per worker, reuses only marked app tabs with empty composers, and opens new tabs when needed. A freed worker takes the next case from the shared queue. File assignment has the original single-case 900-second allowance; transfer verification has a separate 600-second limit and requires expected attachment chips, no active upload indicators, and an enabled Send control to stay stable. Prompt entry happens before that Send-gate check. No case is submitted merely because file chips appeared.
+The adapter keeps one page per worker, reuses only marked app tabs with empty composers, and opens new tabs when needed. A freed worker takes the next case from the shared queue. The workspace resolver yields UNC paths for S: documents. For UNC batches up to 40 MiB, Python reads the files and Playwright assigns their bytes to Copilot's selected document input; larger batches are copied into a per-run local temporary folder and assigned from there, with cleanup after transfer verification. Local paths retain the browser-local CDP route and its Playwright fallback. File assignment has the original single-case 900-second allowance; transfer verification starts a separate 600-second limit after assignment and requires the exact expected attachment count and names, no active upload indicators, and an enabled Send control to stay stable. Prompt entry happens before that Send-gate check. No case is submitted merely because file chips appeared.
 
 ## Concurrency boundary
 

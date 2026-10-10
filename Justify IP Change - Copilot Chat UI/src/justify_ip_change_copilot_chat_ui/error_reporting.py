@@ -71,7 +71,7 @@ _DIAGNOSTIC_ENUMS = {
     "navigation_outcome": {"success", "auth", "forbidden", "timeout", "error", "no_response"},
     "prompt_verification": {"exact", "rendered_blank_lines", "mismatch"},
     "attachment_assignment_mode": {"bulk", "sequential"},
-    "attachment_assignment_route": {"browser_local_cdp", "playwright_fallback"},
+    "attachment_assignment_route": {"browser_local_cdp", "playwright_fallback", "playwright_buffer", "local_staging"},
     "attachment_cdp_preflight_error_type": _ERROR_TYPES | {"NoCompatibleInput"},
     "attachment_cdp_assignment_error_type": _ERROR_TYPES,
     "attachment_picker_error_type": _ERROR_TYPES,

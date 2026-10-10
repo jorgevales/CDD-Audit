@@ -51,6 +51,9 @@ class EdgeSessionTests(unittest.TestCase):
         self.assertFalse(PlaywrightCopilotAdapter._accepts_documents("image/png", paths))
         self.assertTrue(PlaywrightCopilotAdapter._accepts_documents(".pdf,.md", paths))
         self.assertTrue(PlaywrightCopilotAdapter._accepts_documents(None, paths))
+        self.assertTrue(PlaywrightCopilotAdapter._accepts_documents(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document", (Path("review.docx"),)
+        ))
 
     def test_rich_editor_blank_line_expansion_preserves_complete_prompt(self):
         normalize = PlaywrightCopilotAdapter._comparable_prompt_text
@@ -147,6 +150,52 @@ class EdgeSessionTests(unittest.TestCase):
             with self.assertRaises(CopilotUIError):
                 asyncio.run(adapter._assign_files(file_input, (Path("first.pdf"), Path("second.md"))))
             file_input.set_input_files.assert_not_awaited()
+
+    def test_unc_small_files_use_bytes_from_python_process(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "document.pdf"
+            path.write_bytes(b"synthetic pdf")
+            adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
+            item = SimpleNamespace(attachments=SimpleNamespace(paths=(path,)))
+            with patch.object(adapter, "_requires_unc_bridge", return_value=True), patch.object(
+                adapter, "_attach_prepared", new=AsyncMock()
+            ) as prepared:
+                asyncio.run(adapter._attach(item))
+            self.assertEqual(prepared.await_args.kwargs["route"], "playwright_buffer")
+            self.assertEqual(prepared.await_args.kwargs["payloads"][0]["buffer"], b"synthetic pdf")
+            self.assertEqual(prepared.await_args.kwargs["payloads"][0]["name"], "document.pdf")
+
+    def test_unc_large_files_are_staged_until_upload_completes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "document.pdf"
+            path.write_bytes(b"synthetic pdf")
+            adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
+            item = SimpleNamespace(attachments=SimpleNamespace(paths=(path,)))
+            staged_path = None
+
+            async def verify(_item, paths, **kwargs):
+                nonlocal staged_path
+                staged_path = paths[0]
+                self.assertEqual(kwargs["route"], "local_staging")
+                self.assertEqual(staged_path.read_bytes(), path.read_bytes())
+
+            with patch.object(adapter, "_requires_unc_bridge", return_value=True), patch(
+                "justify_ip_change_copilot_chat_ui.copilot_ui.BUFFER_UPLOAD_LIMIT_BYTES", 1
+            ), patch.object(adapter, "_attach_prepared", side_effect=verify):
+                asyncio.run(adapter._attach(item))
+            self.assertFalse(staged_path.exists())
+
+    def test_buffer_route_assigns_selected_input_without_cdp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
+            adapter.context = SimpleNamespace(new_cdp_session=AsyncMock())
+            file_input = SimpleNamespace(set_input_files=AsyncMock())
+            payload = {"name": "document.pdf", "mimeType": "application/pdf", "buffer": b"synthetic"}
+            asyncio.run(adapter._assign_files(file_input, (Path("document.pdf"),),
+                                              payloads=[payload], route="playwright_buffer"))
+            file_input.set_input_files.assert_awaited_once_with([payload], timeout=900_000)
+            adapter.context.new_cdp_session.assert_not_awaited()
+            self.assertEqual(adapter.case_diagnostics["attachment_assignment_route"], "playwright_buffer")
 
     def test_prompt_is_filled_before_upload_and_no_send_occurs_on_upload_failure(self):
         with tempfile.TemporaryDirectory() as directory:

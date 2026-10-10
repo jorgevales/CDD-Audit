@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import mimetypes
+import os
+from pathlib import Path
 import re
+import shutil
+import tempfile
 import time
 from typing import Protocol
 import unicodedata
@@ -39,6 +44,7 @@ SEND_SELECTORS = (
 SINGLE_CASE_UPLOAD_TIMEOUT_SECONDS = 600
 SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS = 900_000
 TRANSFER_QUIET_SECONDS = 0.55
+BUFFER_UPLOAD_LIMIT_BYTES = 40 * 1024 * 1024
 ATTACH_BUTTON_SELECTORS = (
     "#plus-menu-container button[data-testid='PlusMenuButton']",
     "#plus-menu-container button",
@@ -433,20 +439,75 @@ class PlaywrightCopilotAdapter:
 
     async def _attach(self, item: QueueItem) -> None:
         paths = item.attachments.paths
+        if len({path.name.casefold() for path in paths}) != len(paths):
+            raise CopilotUIError("Attachment names must be unique to verify every document. Send was not clicked.")
+        if self._requires_unc_bridge(paths):
+            sizes = await asyncio.to_thread(self._attachment_sizes, paths)
+            if sum(sizes) <= BUFFER_UPLOAD_LIMIT_BYTES:
+                payloads = await asyncio.to_thread(self._file_payloads, paths, sizes)
+                await self._attach_prepared(item, paths, payloads=payloads, route="playwright_buffer")
+                return
+            with tempfile.TemporaryDirectory(prefix="justify-ip-upload-") as directory:
+                staged = await asyncio.to_thread(self._stage_files, paths, sizes, Path(directory))
+                await self._attach_prepared(item, staged, route="local_staging")
+            return
+        await self._attach_prepared(item, paths)
+
+    @staticmethod
+    def _requires_unc_bridge(paths: tuple[Path, ...]) -> bool:
+        return os.name == "nt" and any(str(path).startswith("\\\\") for path in paths)
+
+    @staticmethod
+    def _attachment_sizes(paths: tuple[Path, ...]) -> list[int]:
+        sizes = []
+        for path in paths:
+            if not path.is_file():
+                raise CopilotUIError("A selected document is no longer an accessible file. Send was not clicked.")
+            sizes.append(path.stat().st_size)
+        return sizes
+
+    @staticmethod
+    def _file_payloads(paths: tuple[Path, ...], sizes: list[int]) -> list[dict]:
+        mime = {".pdf": "application/pdf", ".md": "text/markdown", ".txt": "text/plain"}
+        payloads = []
+        for path, size in zip(paths, sizes):
+            data = path.read_bytes()
+            if len(data) != size:
+                raise CopilotUIError("A document changed while it was being prepared. Send was not clicked.")
+            content_type = mime.get(path.suffix.casefold()) or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            payloads.append({"name": path.name, "mimeType": content_type, "buffer": data})
+        return payloads
+
+    @staticmethod
+    def _stage_files(paths: tuple[Path, ...], sizes: list[int], directory: Path) -> tuple[Path, ...]:
+        staged = []
+        for path, size in zip(paths, sizes):
+            target = directory / path.name
+            shutil.copyfile(path, target)
+            if target.stat().st_size != size:
+                raise CopilotUIError("A document changed while it was being prepared. Send was not clicked.")
+            staged.append(target)
+        return tuple(staged)
+
+    async def _attach_prepared(self, item: QueueItem, upload_paths: tuple[Path, ...], *,
+                               payloads: list[dict] | None = None, route: str | None = None) -> None:
+        paths = item.attachments.paths
         file_input = await self._ensure_attachment_input(paths)
-        deadline = time.monotonic() + SINGLE_CASE_UPLOAD_TIMEOUT_SECONDS
         multiple = await file_input.get_attribute("multiple") is not None
         self.case_diagnostics["attachment_assignment_mode"] = "bulk" if multiple else "sequential"
         if multiple or len(paths) == 1:
-            await self._assign_files(file_input, paths)
+            await self._assign_files(file_input, upload_paths, payloads=payloads, route=route)
         else:
             for index, path in enumerate(paths):
                 if index:
                     file_input = await self._ensure_attachment_input((path,))
-                await self._assign_files(file_input, (path,))
+                await self._assign_files(file_input, (upload_paths[index],),
+                                         payloads=payloads[index:index + 1] if payloads else None, route=route)
                 await self._wait_for_attachment_chips(
-                    [candidate.name.casefold() for candidate in paths[:index + 1]], deadline
+                    [candidate.name.casefold() for candidate in paths[:index + 1]],
+                    time.monotonic() + SINGLE_CASE_UPLOAD_TIMEOUT_SECONDS,
                 )
+        deadline = time.monotonic() + SINGLE_CASE_UPLOAD_TIMEOUT_SECONDS
         expected = [path.name.casefold() for path in paths]
         stable_since = None
         retry_count = 0
@@ -467,7 +528,7 @@ class PlaywrightCopilotAdapter:
                     stable_since = None
                     await asyncio.sleep(2)
                     continue
-            complete = (state["chip_count"] >= len(expected) and state["matched_count"] == len(expected)
+            complete = (state["chip_count"] == len(expected) and state["matched_count"] == len(expected)
                         and not state["active"] and not state["upload_error"] and state["send_enabled"])
             if complete:
                 stable_since = stable_since or time.monotonic()
@@ -485,17 +546,25 @@ class PlaywrightCopilotAdapter:
             await asyncio.sleep(0.25)
         raise CopilotUIError("Documents did not reach a stable, fully transferred state before the single-case timeout. Send was not clicked.")
 
-    async def _assign_files(self, file_input, paths: tuple) -> None:
-        route = "playwright_fallback"
-        if self.context is not None and await self._assign_browser_local_files(paths):
-            route = "browser_local_cdp"
+    async def _assign_files(self, file_input, paths: tuple, *, payloads: list[dict] | None = None,
+                            route: str | None = None) -> None:
+        selected_route = route or "playwright_fallback"
+        if payloads is not None:
+            await file_input.set_input_files(payloads, timeout=SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS)
+        elif route == "local_staging":
+            await file_input.set_input_files(
+                [str(path) for path in paths], timeout=SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS
+            )
+        elif self.context is not None and await self._assign_browser_local_files(paths):
+            selected_route = "browser_local_cdp"
         else:
             await file_input.set_input_files(
                 [str(path) for path in paths], timeout=SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS
             )
-        self.case_diagnostics["attachment_assignment_route"] = route
+        self.case_diagnostics["attachment_assignment_route"] = selected_route
         if not self._reported_attachment_route:
-            label = "browser-local CDP" if route == "browser_local_cdp" else "Playwright fallback"
+            label = {"browser_local_cdp": "browser-local CDP", "playwright_buffer": "Playwright file contents",
+                     "local_staging": "local staging", "playwright_fallback": "Playwright file paths"}[selected_route]
             print(f"\033[92mAttachment assignment method: {label}\033[0m", flush=True)
             self._reported_attachment_route = True
 
@@ -576,9 +645,9 @@ class PlaywrightCopilotAdapter:
         mime = {".pdf": "application/pdf", ".md": "text/markdown", ".txt": "text/plain"}
         return all(
             path.suffix.casefold() in tokens
-            or mime.get(path.suffix.casefold(), "") in tokens
-            or ("application/*" in tokens and path.suffix.casefold() == ".pdf")
-            or ("text/*" in tokens and path.suffix.casefold() in {".md", ".txt"})
+            or (mime.get(path.suffix.casefold()) or mimetypes.guess_type(path.name)[0]) in tokens
+            or ("application/*" in tokens and (mime.get(path.suffix.casefold()) or mimetypes.guess_type(path.name)[0] or "").startswith("application/"))
+            or ("text/*" in tokens and (mime.get(path.suffix.casefold()) or mimetypes.guess_type(path.name)[0] or "").startswith("text/"))
             for path in paths
         )
 

@@ -14,9 +14,11 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+import justify_ip_change_copilot_chat_ui.copilot_ui as copilot_ui
 from justify_ip_change_copilot_chat_ui.copilot_ui import EDITOR_SELECTORS, PlaywrightCopilotAdapter
 from justify_ip_change_copilot_chat_ui.edge_session import EdgeSession
 from justify_ip_change_copilot_chat_ui.models import AttachmentPlan, BatchInfo, CaseRecord, QueueItem
+from justify_ip_change_copilot_chat_ui.paths import WindowsSDriveResolver
 from justify_ip_change_copilot_chat_ui.profile_storage import default_edge_profile
 
 
@@ -106,6 +108,12 @@ async def attach_via_cdp(adapter: PlaywrightCopilotAdapter, files: tuple[Path, .
 
 async def main() -> None:
     count = next((int(arg.split("=", 1)[1]) for arg in sys.argv[1:] if arg.startswith("--count=")), 2)
+    s_drive_folder = next((arg.split("=", 1)[1] for arg in sys.argv[1:]
+                           if arg.startswith("--s-drive-folder=")), None)
+    if "--force-stage" in sys.argv and not s_drive_folder:
+        raise ValueError("--force-stage requires --s-drive-folder")
+    if "--force-stage" in sys.argv:
+        copilot_ui.BUFFER_UPLOAD_LIMIT_BYTES = 1
     if not 2 <= count <= 20:
         raise ValueError("--count must be between 2 and 20")
     edge = EdgeSession(default_edge_profile())
@@ -125,7 +133,8 @@ async def main() -> None:
                     continue
         return
     adapter = PlaywrightCopilotAdapter(edge, tab_count=1, startup_timeout=420)
-    with TemporaryDirectory(prefix="copilot-live-upload-") as directory:
+    scratch_root = WindowsSDriveResolver().resolve_and_validate(s_drive_folder) if s_drive_folder else None
+    with TemporaryDirectory(prefix="copilot-live-upload-", dir=scratch_root) as directory:
         root = Path(directory)
         pdfs = [root / f"synthetic-review-{index:02d}.pdf" for index in range(1, count)]
         markdown = root / "synthetic-instructions.md"
@@ -133,6 +142,10 @@ async def main() -> None:
             pdf.write_bytes(synthetic_pdf())
         markdown.write_text("# Synthetic attachment check\nNo real case data.\n", encoding="utf-8")
         files = tuple([*pdfs, markdown])
+        if s_drive_folder:
+            resolver = WindowsSDriveResolver()
+            files = tuple(resolver.resolve_and_validate(path) for path in files)
+            print("Using synthetic files on the live S: share through its resolved UNC path.", flush=True)
         try:
             print("Opening the real Copilot page in visible Edge; sign in there if prompted.", flush=True)
             await adapter.start()

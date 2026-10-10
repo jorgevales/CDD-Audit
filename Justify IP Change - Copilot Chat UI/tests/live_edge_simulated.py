@@ -16,6 +16,7 @@ from playwright.async_api import async_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+import justify_ip_change_copilot_chat_ui.copilot_ui as copilot_ui
 from justify_ip_change_copilot_chat_ui.copilot_ui import COPILOT_URL, EDITOR_SELECTORS, PlaywrightCopilotAdapter
 from justify_ip_change_copilot_chat_ui.edge_session import find_edge
 from justify_ip_change_copilot_chat_ui.models import AttachmentPlan, BatchInfo, CaseRecord, QueueItem
@@ -115,6 +116,10 @@ async def main() -> None:
                 await context.route("**/chat", lambda route: route.fulfill(status=200, content_type="text/html", body=PAGE))
                 page = await context.new_page()
                 adapter = PlaywrightCopilotAdapter(edge=None, tab_count=tab_count, response_timeout=10)
+                if "--unc-bridge" in sys.argv:
+                    adapter._requires_unc_bridge = lambda _paths: True
+                if "--force-stage" in sys.argv:
+                    copilot_ui.BUFFER_UPLOAD_LIMIT_BYTES = 1
                 adapter.browser, adapter.context, adapter.page = browser, context, page
                 await page.goto(COPILOT_URL)
                 started = time.monotonic()

@@ -133,7 +133,7 @@ This uses real Edge to exercise six parallel tabs, delayed file inputs, document
 
 Use `--multi-only` to isolate the six-tab run, or `--single-only` to run a one-tab case followed by the single-file-picker fallback. The optional `--real-readiness` flag opens the actual Copilot site in visible Edge and reports only the page category and composer availability; it never sends a prompt or uploads a file.
 
-To check the real signed-in Copilot attachment picker without sending a message, run `.venv\Scripts\python.exe tests\live_real_attachments.py --count=20`. Complete sign-in directly in the visible Edge window if requested. The probe uses only generated synthetic files, verifies all chips and transfer readiness, leaves Edge open for inspection, and never clicks Send. `--inspect-accept` only reads the live picker's supported extensions.
+To check the real signed-in Copilot attachment picker without sending a message, run `.venv\Scripts\python.exe tests\live_real_attachments.py --count=20`. Complete sign-in directly in the visible Edge window if requested. The probe uses only generated synthetic files, verifies all chips and transfer readiness, leaves Edge open for inspection, and never clicks Send. `--inspect-accept` only reads the live picker's supported extensions. In the VDI, add `--s-drive-folder="S:\a writable scratch folder"` to create temporary synthetic files on the mapped share and test the resolved UNC upload route. Add `--force-stage` to that command to test the large-file staging route with the same small synthetic files.
 
 ## VDI deployment
 
