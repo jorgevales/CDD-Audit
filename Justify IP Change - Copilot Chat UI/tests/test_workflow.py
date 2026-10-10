@@ -189,6 +189,7 @@ class WorkspaceTests(unittest.TestCase):
         error.diagnostics = {"case": {
             "phase": "composer_fill", "prompt_verification": "mismatch",
             "prompt_expected_chars": 2450, "prompt_observed_chars": 2455,
+            "attachment_assignment_route": "browser_local_cdp",
             "prompt_text": "private prompt text must not be recorded",
         }}
         path = write_error_report(workspace, error, stage="case_processing")
@@ -197,6 +198,7 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(case["prompt_verification"], "mismatch")
         self.assertEqual(case["prompt_expected_chars"], 2450)
         self.assertEqual(case["prompt_observed_chars"], 2455)
+        self.assertEqual(case["attachment_assignment_route"], "browser_local_cdp")
         self.assertNotIn("prompt_text", case)
         self.assertNotIn("private prompt text", path.read_text(encoding="utf-8"))
 

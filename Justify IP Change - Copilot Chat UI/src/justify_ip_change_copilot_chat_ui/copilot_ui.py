@@ -105,6 +105,7 @@ class PlaywrightCopilotAdapter:
         self.page = None
         self.startup_diagnostics: dict[str, object] = {"phase": "not_started"}
         self.case_diagnostics: dict[str, object] = {"phase": "not_started"}
+        self._reported_attachment_route = False
 
     @staticmethod
     def _ready_for_queue(editor_visible: bool, picker_visible: bool | None, model_requested: bool) -> bool:
@@ -437,14 +438,12 @@ class PlaywrightCopilotAdapter:
         multiple = await file_input.get_attribute("multiple") is not None
         self.case_diagnostics["attachment_assignment_mode"] = "bulk" if multiple else "sequential"
         if multiple or len(paths) == 1:
-            await file_input.set_input_files(
-                [str(path) for path in paths], timeout=SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS
-            )
+            await self._assign_files(file_input, paths)
         else:
             for index, path in enumerate(paths):
                 if index:
                     file_input = await self._ensure_attachment_input((path,))
-                await file_input.set_input_files([str(path)], timeout=SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS)
+                await self._assign_files(file_input, (path,))
                 await self._wait_for_attachment_chips(
                     [candidate.name.casefold() for candidate in paths[:index + 1]], deadline
                 )
@@ -485,6 +484,75 @@ class PlaywrightCopilotAdapter:
                 last_notice = time.monotonic()
             await asyncio.sleep(0.25)
         raise CopilotUIError("Documents did not reach a stable, fully transferred state before the single-case timeout. Send was not clicked.")
+
+    async def _assign_files(self, file_input, paths: tuple) -> None:
+        route = "playwright_fallback"
+        if self.context is not None and await self._assign_browser_local_files(paths):
+            route = "browser_local_cdp"
+        else:
+            await file_input.set_input_files(
+                [str(path) for path in paths], timeout=SINGLE_CASE_FILE_ASSIGN_TIMEOUT_MS
+            )
+        self.case_diagnostics["attachment_assignment_route"] = route
+        if not self._reported_attachment_route:
+            label = "browser-local CDP" if route == "browser_local_cdp" else "Playwright fallback"
+            print(f"\033[92mAttachment assignment method: {label}\033[0m", flush=True)
+            self._reported_attachment_route = True
+
+    async def _assign_browser_local_files(self, paths: tuple) -> bool:
+        """Use the original Step 08 browser-local path route for large S:/UNC files.
+
+        A pre-assignment discovery failure permits Playwright fallback. Once the
+        CDP assignment call is attempted, its outcome may be ambiguous, so a
+        failure must not silently reassign the same files.
+        """
+        try:
+            session = await self.context.new_cdp_session(self.page)
+        except Exception as exc:
+            self.case_diagnostics["attachment_cdp_preflight_error_type"] = type(exc).__name__
+            return False
+        try:
+            try:
+                document = await session.send("DOM.getDocument", {"depth": -1, "pierce": True})
+                found = await session.send("DOM.querySelectorAll", {
+                    "nodeId": document["root"]["nodeId"], "selector": "input[type=file]",
+                })
+                candidates = []
+                for node_id in found.get("nodeIds", [])[:30]:
+                    details = await session.send("DOM.describeNode", {"nodeId": node_id})
+                    attrs = details.get("node", {}).get("attributes", [])
+                    attributes = {str(attrs[index]).casefold(): str(attrs[index + 1])
+                                  for index in range(0, len(attrs) - 1, 2)}
+                    multiple = "multiple" in attributes
+                    accept = attributes.get("accept")
+                    if "disabled" in attributes or (len(paths) > 1 and not multiple):
+                        continue
+                    if not self._accepts_documents(accept, paths):
+                        continue
+                    score = (40 if accept else 0) + (20 if multiple else 0)
+                    candidates.append((score, int(node_id)))
+                if not candidates:
+                    self.case_diagnostics["attachment_cdp_preflight_error_type"] = "NoCompatibleInput"
+                    return False
+                selected = max(candidates)[1]
+            except Exception as exc:
+                self.case_diagnostics["attachment_cdp_preflight_error_type"] = type(exc).__name__
+                return False
+            try:
+                await session.send("DOM.setFileInputFiles", {
+                    "files": [str(path) for path in paths], "nodeId": selected,
+                })
+            except Exception as exc:
+                self.case_diagnostics["attachment_cdp_assignment_error_type"] = type(exc).__name__
+                raise CopilotUIError(
+                    "Browser-local file assignment was attempted but not confirmed. Send was not clicked."
+                ) from exc
+            return True
+        finally:
+            try:
+                await session.detach()
+            except Exception:
+                pass
 
     async def _wait_for_attachment_chips(self, expected: list[str], deadline: float) -> None:
         """In a single-file picker, let React accept each file before replacing it."""

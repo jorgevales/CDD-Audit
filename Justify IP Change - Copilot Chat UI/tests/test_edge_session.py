@@ -95,6 +95,59 @@ class EdgeSessionTests(unittest.TestCase):
             self.assertEqual(chips.await_count, 2)
             self.assertEqual(adapter.case_diagnostics["attachment_assignment_mode"], "sequential")
 
+    def test_browser_local_cdp_assignment_is_primary_and_does_not_stage_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
+            async def send(method, _args):
+                if method == "DOM.getDocument":
+                    return {"root": {"nodeId": 1}}
+                if method == "DOM.querySelectorAll":
+                    return {"nodeIds": [2]}
+                if method == "DOM.describeNode":
+                    return {"node": {"attributes": ["type", "file", "multiple", "", "accept", ".pdf,.md"]}}
+                if method == "DOM.setFileInputFiles":
+                    return {}
+                raise AssertionError(method)
+            session = SimpleNamespace(send=AsyncMock(side_effect=send), detach=AsyncMock())
+            adapter.context = SimpleNamespace(new_cdp_session=AsyncMock(return_value=session))
+            adapter.page = object()
+            file_input = SimpleNamespace(set_input_files=AsyncMock())
+            asyncio.run(adapter._assign_files(file_input, (Path("first.pdf"), Path("second.md"))))
+            self.assertEqual(adapter.case_diagnostics["attachment_assignment_route"], "browser_local_cdp")
+            file_input.set_input_files.assert_not_awaited()
+            self.assertEqual(session.send.await_args_list[-1].args[0], "DOM.setFileInputFiles")
+
+    def test_cdp_preflight_failure_uses_playwright_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
+            adapter.context = SimpleNamespace(new_cdp_session=AsyncMock(side_effect=RuntimeError("synthetic")))
+            adapter.page = object()
+            file_input = SimpleNamespace(set_input_files=AsyncMock())
+            asyncio.run(adapter._assign_files(file_input, (Path("first.pdf"),)))
+            self.assertEqual(adapter.case_diagnostics["attachment_assignment_route"], "playwright_fallback")
+            file_input.set_input_files.assert_awaited_once()
+
+    def test_cdp_assignment_error_never_reassigns_ambiguously(self):
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
+            async def send(method, _args):
+                if method == "DOM.getDocument":
+                    return {"root": {"nodeId": 1}}
+                if method == "DOM.querySelectorAll":
+                    return {"nodeIds": [2]}
+                if method == "DOM.describeNode":
+                    return {"node": {"attributes": ["type", "file", "multiple", "", "accept", ".pdf,.md"]}}
+                if method == "DOM.setFileInputFiles":
+                    raise RuntimeError("synthetic ambiguous assignment")
+                raise AssertionError(method)
+            session = SimpleNamespace(send=AsyncMock(side_effect=send), detach=AsyncMock())
+            adapter.context = SimpleNamespace(new_cdp_session=AsyncMock(return_value=session))
+            adapter.page = object()
+            file_input = SimpleNamespace(set_input_files=AsyncMock())
+            with self.assertRaises(CopilotUIError):
+                asyncio.run(adapter._assign_files(file_input, (Path("first.pdf"), Path("second.md"))))
+            file_input.set_input_files.assert_not_awaited()
+
     def test_prompt_is_filled_before_upload_and_no_send_occurs_on_upload_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             adapter = PlaywrightCopilotAdapter(EdgeSession(Path(directory) / "profile"))
